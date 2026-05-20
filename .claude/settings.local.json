@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet test *)",
+      "PowerShell(git commit *)",
+      "PowerShell(\\(Get-Content \"src/LLM/Core.LLM.Tests/Fsm/DialogueManagerScenarioTests.cs\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(\\(Get-Content \"src/LLM/Core.LLM.Tests/Agents/AgentOrchestratorTests.cs\" | Measure-Object -Line\\).Lines)",
+      "Bash(New-Item -ItemType Directory -Path \"C:\\\\Projects\\\\core-api\\\\docs\\\\epics\\\\fix-availability-guard-coverage\" -Force)",
+      "Bash(Out-Null)",
+      "Bash(Write-Output \"OK\")",
+      "Bash(grep -E \"^A\\\\s+docs/epics/.*/closure-notes\\\\.md$\")",
+      "Bash(dotnet ef *)",
+      "Bash(dotnet --version)",
+      "Bash(dotnet --list-sdks)",
+      "Bash(dotnet tool *)",
+      "Bash(export PATH=\"$PATH:$HOME/.dotnet/tools\")",
+      "Bash(sed -n '370,395p' src/LLM/Core.LLM.Tests/Fsm/DialogueManagerScenarioTests.cs)",
+      "Bash(sed -n '1550,1620p' src/LLM/Core.LLM.Tests/Fsm/DialogueManagerScenarioTests.cs)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Projects\\\\core-api\\\\src\" -Directory)",
+      "Bash(Select-Object Name)",
+      "PowerShell(git add \"docs/epics/feature-c7-service-eligibility-rule/closure-notes.md\" \"docs/epics/feature-c7-service-eligibility-rule/tracking.md\")",
+      "Bash(xargs grep *)",
+      "Bash(mkdir -p \"c:\\\\Projects\\\\core-api\\\\docs\\\\epics\\\\refactor-shared-namespace\")",
+      "Bash(mkdir -p \"c:\\\\Projects\\\\core-api\\\\docs\\\\epics\\\\feature-conversation-module\")",
+      "Bash(grep -E '^A\\\\s+docs/epics/.*/closure-notes\\\\.md$')",
+      "Bash(echo \"exit=$?\")",
+      "Bash(grep -E \"\\\\.cs$\")",
+      "Bash(grep -v \".cs$\\\\|$\")",
+      "Bash(mkdir -p docs/overviews && echo OK)",
+      "Bash(git stash *)",
+      "Bash(grep -E \"closure-notes\\\\.md$\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Projetos\\Estimador\\docs"
+    ]
+  }
+}
