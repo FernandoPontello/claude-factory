@@ -1,0 +1,19 @@
+{
+  "name": "claude-factory-marketplace",
+  "owner": {
+    "name": "Fernando Pontello",
+    "email": "pontellofernando@gmail.com"
+  },
+  "metadata": {
+    "description": "Marketplace privado da Claude Factory",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-factory",
+      "source": "./",
+      "description": "Pipeline PO/Dev com board agnóstico via MCP — gate humano, single-writer, commit como fronteira da verdade.",
+      "category": "workflow"
+    }
+  ]
+}

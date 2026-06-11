@@ -1,0 +1,162 @@
+# Adapter Azure DevOps — manifesto de dados do contrato canônico (.claude/factory-process.md)
+# Destino no repo: .claude/adapters/azure-devops/manifest.yaml
+# Tools pinados contra o TOOLSET oficial do microsoft/azure-devops-mcp.
+# Nota: clientes podem exibir os nomes com namespace (ex: mcp_ado_wit_create_work_item);
+# o resolve do /setup casa por sufixo. O /setup valida cada tool via tools/list.
+
+provider: azure-devops
+
+mcp:
+  preferred: remote                       # recomendação oficial; o local será substituído com o tempo
+  remote:
+    transport: http
+    url: "https://mcp.dev.azure.com/${binding.organization}"
+    # Auth: Entra ID via fluxo do cliente (/mcp na primeira sessão).
+    # Endurecimento opcional do board-writer: headers X-MCP-Toolsets / X-MCP-Readonly — ver ADAPTER.md §1.
+  local:                                  # fallback stdio (Node 20+)
+    transport: stdio
+    command: npx
+    args: ["-y", "@azure-devops/mcp", "${binding.organization}",
+           "-d", "core", "work-items", "search", "wiki",
+           "--authentication", "azcli"]   # alternativas: interactive | envvar | pat — ADAPTER.md §1
+
+binding:                                  # validado/persistido pelo /setup no kanban-config.json
+  organization: "${kanban-config.board.organization}"
+  project: "${kanban-config.board.project}"
+
+entities:
+  epic: "Epic"                            # work item type
+  feature: "Feature"
+  task: "Task"
+
+states:                                   # System.State da Feature — exige o processo herdado "Factory" (conduzido pelo /setup via prerequisites:)
+  ready: "Ready"
+  design: "Design"
+  in_progress: "In Progress"
+  review: "Review"
+  done: "Done"
+  closed: "Closed"
+
+task_done_state: "Closed"                 # Task (Agile base): New → Active → Closed
+
+prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta só o inverificável
+  - id: mcp_connection
+    verify: { mcp: tools_list_responds }
+    fix: |
+      Conecte o MCP do Azure DevOps (exige conta Microsoft e organização — dev.azure.com;
+      em Organization settings → Policies, habilite "Third-party application access via
+      OAuth"; convide o segundo operador em Organization settings → Users, nível Basic):
+        Remoto (recomendado): claude mcp add --transport http ado https://mcp.dev.azure.com/<org>
+        Local (fallback):     claude mcp add ado -- npx -y @azure-devops/mcp <org> -d core work-items search wiki --authentication azcli
+      Rode /mcp para autenticar. Reinicie a sessão e re-rode /setup.
+  - id: project
+    input:  { ask: "Qual o nome do projeto no Azure DevOps?", bind: project }
+    verify: { tool: core_list_projects, match: "name == $project" }
+    fix: |
+      Crie em dev.azure.com → New project (Private), escolhendo em Advanced →
+      Work item process o processo "Factory" (pré-requisito seguinte).
+  - id: inherited_process
+    ask: "O projeto roda no processo herdado 'Factory', com os 6 estados na Feature? (processo é configuração de organização — o MCP não a enxerga)"
+    fix: |
+      Organization settings → Boards → Process → card Agile → ⋯ → Create inherited
+      process → "Factory". Em Factory → work item type Feature → States:
+        adicionar Ready (Proposed) · Design, In Progress e Review (In Progress) ·
+        Done (Resolved); ocultar New, Active e Resolved; manter Closed (Completed).
+      Com New oculto, toda Feature nasce em Ready. A base Agile é obrigatória
+      (hierarquia Epic > Feature e campo Completed Work na Task). Projeto existente
+      em Agile migra por: Process → Agile → Projects → ⋯ → Change process → Factory.
+    note: "divergência de nome de estado falha-rápido na primeira transição (try-reporta-prossegue + /sync reparam)"
+
+resolve:                                  # /setup roda uma vez
+  - { tool: core_list_projects, expect: "binding.project presente na lista" }
+  - { check: tools_list_contains, tools: [ wit_create_work_item, wit_update_work_item, wit_add_child_work_items, wit_work_items_link, wit_get_work_item, wit_get_work_items_batch_by_ids, wit_add_work_item_comment, search_workitem, wiki_list_wikis, wiki_create_or_update_page ] }
+  # Estados não são listáveis via MCP: o contrato é o pré-requisito inherited_process
+  # (prerequisites:); divergência de nome falha-rápido na primeira transição
+  # (try-reporta-prossegue + /sync).
+
+ops:
+  create_epic:
+    tool: wit_create_work_item
+    args: { project: "{binding.project}", workItemType: "{entities.epic}", fields: { "System.Title": "$title", "System.Description": "$body" } }
+    then:
+      - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
+        args: { id: "$created_id", fields: { "System.Tags": "factory-key:$key" } }
+    returns: id
+
+  create_feature:                         # nasce filha do Epic, já em Ready (New está oculto no processo Factory)
+    tool: wit_add_child_work_items
+    args: { parentId: "$epic_id", project: "{binding.project}", workItemType: "{entities.feature}", title: "$title", description: "$body" }
+    then:
+      - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
+        args: { id: "$created_id", fields: { "System.Tags": "factory-key:$key" } }
+    returns: id
+
+  find_by_key:                            # sem WIQL ad-hoc no toolset → busca de work items (domínio search)
+    tool: search_workitem
+    args: { searchText: "factory-key:$key", project: ["{binding.project}"], workItemType: ["{entities.feature}"] }
+    returns: first(results).id | null     # indexação tem latência de segundos — ver ADAPTER.md §4
+
+  move_feature:                           # estágio é o System.State nativo (stage_label: none)
+    tool: wit_update_work_item
+    args:
+      id: "$feature_id"
+      fields:
+        "System.State": "{states.$stage}"
+    returns: ok
+
+  create_task:
+    tool: wit_add_child_work_items
+    args: { parentId: "$feature_id", project: "{binding.project}", workItemType: "{entities.task}", title: "$title", description: "$body" }
+    returns: id
+
+  complete_task:
+    tool: wit_update_work_item
+    args:
+      id: "$task_id"
+      fields:
+        "System.State": "{task_done_state}"
+        "Microsoft.VSTS.Scheduling.CompletedWork": "$minutes / 60"     # campo nativo em HORAS — converter
+    then:
+      - when: "$note != null"
+        tool: wit_add_work_item_comment   # aprendizado da implementação
+        args: { project: "{binding.project}", workItemId: "$task_id", comment: "$note" }
+    returns: ok
+
+  comment_feature:                        # trilha do ciclo: design.md, closure-notes.md
+    tool: wit_add_work_item_comment
+    args: { project: "{binding.project}", workItemId: "$feature_id", comment: "$body" }
+
+  link_related:
+    tool: wit_work_items_link
+    args: { project: "{binding.project}", id: "$feature_id", linkToId: "$related_id", type: "related" }
+
+  tag_feature:
+    tool: wit_update_work_item
+    args: { id: "$feature_id", fields: { "System.Tags": "append $tag" } }
+
+  read_board:                             # /sync: varre por prefixo de identidade + hidrata em batch
+    tool: search_workitem
+    args: { searchText: "factory-key:", project: ["{binding.project}"] }
+    then:
+      - tool: wit_get_work_items_batch_by_ids
+        args: { project: "{binding.project}", ids: "$result_ids" }
+
+  wiki_publish_page:                      # capability wiki: native (opt-in — default da factory é repo-markdown)
+    tool: wiki_create_or_update_page
+    args: { project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}", path: "$root/$slug", content: "$content" }
+
+  wiki_read_index:
+    tool: wiki_list_pages
+    args: { project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}" }
+
+capabilities:
+  hierarchy: native                       # Epic > Feature > Task via add_child / parent links
+  tasks: native                           # Task filha direto da Feature (caveat de taskboard — ADAPTER.md §4)
+  states: validate-only                   # estados custom vivem no processo herdado (conduzido pelo /setup via prerequisites:); MCP não os cria
+  identity: tag                           # factory-key como System.Tags — dinâmica, nada a provisionar
+  stage_label: none                       # 6 estados exatos do processo Factory — o System.State é o contrato; marcador só em provider que colapsa estados
+  time: field                             # Microsoft.VSTS.Scheduling.CompletedWork (horas) na Task
+  related: native                         # wit_work_items_link
+  tags: native                            # tags do ADO são criadas ao aplicar
+  search: required                        # find_by_key depende do domínio search (Work Item Search)
+  wiki: native                            # ADO Wiki via wiki_create_or_update_page (opt-in)

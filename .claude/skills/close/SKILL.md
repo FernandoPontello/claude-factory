@@ -1,479 +1,350 @@
 ---
 name: close
-description: Fechar um épico ao fim das tasks (todas executadas pelo /code, ou operador optando por fechamento parcial com pendências adiadas). Faz duas operações em sessão única — (1) revisão de coerência estática task por task (entregue vs pedido, marca incoerências como "Necessário avaliar" sem decidir gravidade) e (2) síntese de closure-notes consolidado em docs/epics/<slug>/closure-notes.md (formato canônico PIPELINE.md §8). Pode delegar a revisão ao sub-agent auxiliar `reviewer` (isolamento + Sonnet). Sinaliza ao operador que rodar /overview (modo incremental) é recomendado. Single-writer de closure-notes e do tracking no fechamento. NÃO modifica código (apenas lê via git read-only). NÃO escreve em docs/overviews/.
+description: Fecho o épico — gates de qualidade rodando o app de verdade, reconcilio os overviews, registro pendências e closure-notes, publico a wiki e levo a Feature a done.
+argument-hint: "<épico-slug>"
+disable-model-invocation: true
+allowed-tools: Bash(git add *) Bash(git commit *)
+hooks:
+  PreToolUse:
+    - matcher: "Edit|Write|NotebookEdit"
+      hooks:
+        - type: command
+          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-writes.ps1" -Stage close
+  Stop:
+    - hooks:
+        - type: command
+          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-scan.ps1" -Stage close
+        - type: prompt
+          prompt: "Se um closure-notes.md acabou de ser escrito nesta sessão: ele cobre TODOS os ACs do prd.md do épico (cada AC-n marcado coberto com a task que o realizou, ou explicitamente descoberto e remetido a pendência)? Se não, bloqueie e aponte os ACs ausentes."
 ---
 
-# close
+# /close — fechamento do épico (Dev)
+
+Recebe a feature completa (todas as tasks `concluída`), passa-a pelos gates de qualidade
+compostos da plataforma, reconcilia os overviews, materializa pendências como Features
+irmãs, registra o histórico em `closure-notes.md`, publica wiki quando a superfície mudou
+e move a Feature para `done`. Nomeie a sessão `<épico-slug>/close` (ex: `checkout/close`).
+
+## Regras inegociáveis
+
+1. **A Lei da Factory.** A IA ajuda a pensar; quem decide é o operador. Todo achado de
+   review, todo diff de overview, toda pendência e toda página de wiki passam por gate
+   explícito antes de virar artefato. Você propõe; ele decide.
+2. **Write-set do estágio** (de `.claude/hooks/stage-map.json`):
+   `docs/epics/<slug>/closure-notes.md`, `docs/epics/<slug>/pending.md`,
+   `docs/overviews/*.md`, `docs/wiki/**`, `.claude/build-run.md` (a receita, gerada no
+   primeiro `/close`). **O `/close` não escreve código.** Achado de
+   review que exige código vira pendência (ato 3) ou o operador re-roda `/code <task-id>`
+   em sessão própria e retoma o `/close` depois — nunca conserte inline.
+3. **Verbos canônicos, nunca tool de provider.** Estágios emitem apenas os verbos de
+   `.claude/factory-process.md`. Escrita no board é sempre: **commit primeiro** → spawnar
+   o agent `board-writer` com o lote de verbos → validar a saída com
+   `.claude/scripts/validate-agent-output` (chaves: `executed,failed,blocked`) →
+   try-reporta-prossegue ("não consegui atualizar o board, rode `/sync` depois").
+   Jamais re-tente em loop nem trave o fechamento por causa do board.
+4. **Commit canônico como último ato:** `factory(close): <slug> — <resumo>`.
+   `git add` **nominal** — por path explícito, nunca `.` ou `-A`. Estágio que não
+   commitou não aconteceu.
+5. **`pending.md` é condicional** (§9). Só nasce com pendência real: escopo faltante do
+   PRD/design ou necessidade descoberta. Fechou limpo = **nenhum** `pending.md` — a
+   ausência do arquivo É o sinal. Tipo único: débito técnico. Cada entrada nasce como
+   Feature irmã em `ready` no próprio `/close` (débito é trabalho aceito, sem gate de
+   promoção), com o `Board-ID` gravado na entrada.
+6. **`closure-notes.md` sempre existe ao fim** e é **histórico append-only, imutável**
+   (distinto dos overviews, que são definição). Cobertura AC-a-AC obrigatória: cada
+   `AC-n` do `prd.md` marcado coberto com a task que o realizou, ou explicitamente
+   descoberto e remetido a pendência. O hook de `Stop` confere isso e bloqueia se faltar.
+7. **Overviews: reconciliação, não append** (§8). O default é **não tocar nada**. Seguir
+   um padrão existente NÃO é mudança. Só escreva se um invariante de arquitetura mudou ou
+   se uma capacidade de produto entrou/saiu — e só após o operador confirmar o diff.
+8. **Wiki: additive e never-delete**, só sob o root configurado, só quando uma capacidade
+   entrou ou mudou (mesmo gatilho da reconciliação). Bug fix e refactor **não** geram
+   página.
+9. **Nunca pushe.** Na faixa dev o push é ato deliberado do operador — é ele que leva a
+   Feature de `done` a `closed` (o `/sync` detecta no origin).
+10. **Estágios não invocam estágios.** Se o fechamento revelar que falta trabalho de outro
+    estágio, reporte e pare — o operador decide.
+
+## Entrada e pré-voo
+
+Argumento: `<épico-slug>` — a pasta `docs/epics/<slug>/`. O hook `gate-stage` já validou
+papel, tree limpa (ou suja só neste write-set — retomada) e frescor de `docs/**` antes de
+você ver este prompt. Verifique cirurgicamente (glob/leitura, nunca suposição):
+
+1. **`docs/epics/<slug>/` existe.** Épico normal: tem `prd.md` com `Board-ID` no header.
+   Re-entrada (pasta `-pNNN`): **não** tem `prd.md` — o "PRD" é a entrada
+   `pending.md#NNN` do épico de origem; o `Board-ID` (Feature irmã) e o
+   `Related-Board-ID` estão no header do `design.md`.
+2. **`design.md` existe** e **todas as tasks** em `tasks/*.md` estão `Status: concluída`
+   (inclusive as `concluída; ver pending.md#NNN` — anote essas referências: são insumo do
+   ato 3). Task pendente → o épico não está pronto para fechar; reporte e pare.
+3. **`closure-notes.md` ainda não existe.** Se existe, isto é **recuperação** de um
+   `/close` interrompido: closure-notes é imutável — não reescreva; complete apenas os
+   atos que faltaram (board, vínculo de pendências, wiki) e re-commite o que for novo.
+4. Leia `prd.md` (a lista de `AC-n` é a espinha de tudo), `design.md` (em especial
+   `## Impacto na arquitetura` — o que o design pré-sinalizou para reconciliar), os
+   `## Tempo` das tasks e `.claude/kanban-config.json` (`wiki.provider`, `wiki.root_path`).
+
+## Ato 1 — Gates de qualidade
+
+### A receita de build/run
+
+O `verifier` opera pela receita `.claude/build-run.md`, gravada pelo `/setup`. Se ela
+**não existe** (projeto nasceu sem código — o `/setup` a deixou para o primeiro `/close`):
+este `/close` a gera agora. Spawne o `verifier` para descobrir, **executando por
+evidência**, como buildar, testar e rodar o app; com o retrato dele em mãos, **esta
+sessão grava o arquivo** — `.claude/build-run.md` está no write-set do estágio.
+**GATE:** o operador valida a receita antes de ela ser usada. Commit imediato e nominal:
+`factory(close): <slug> — receita de build/run gerada`.
+
+### O verifier builda e RODA o app de verdade
+
+Spawne o sub-agent `verifier` com a receita. Ele compõe as skills bundled da plataforma —
+`/verify` e `/run` — para **buildar e executar o app de verdade**, exercitando o
+comportamento que os ACs do PRD descrevem (não apenas testes: o app rodando). Exija saída
+estruturada JSON e valide com `.claude/scripts/validate-agent-output` (variante do SO)
+`-Required "build,tests,run,blockers"`. Saída inválida → re-instrua o agent; nunca prossiga com
+saída parcial. Build ou run quebrados são achados de primeira ordem.
+
+### Os revisores da plataforma
+
+Rode `/code-review` e `/security-review` como revisores sobre o diff do épico (os commits
+`factory(code): <slug> — ...` desde o início da execução). São skills bundled — compor é
+o ponto: a factory não reinventa review.
+
+### Agent team de revisores (opcional, experimental)
+
+Em épico **GRANDE** (muitas tasks, superfície extensa), um agent team pode paralelizar a
+revisão em lentes independentes — segurança, performance, cobertura — cada revisor
+aplicando um filtro distinto sobre o mesmo código, com os achados sintetizados num
+relatório único. É recurso **experimental da plataforma, atrás de flag de ambiente, fora
+do caminho crítico**: se a flag não estiver ligada na sessão, siga sem o time **sem
+perguntar e sem reportar falta** — desabilitado, a factory não sente. Mesmo ligado, é
+opt-in deliberado do operador para o épico grande; o caso comum é dispensá-lo.
 
-Você é o **closer**. Invocado **uma única vez por épico**, ao fim, depois que `/code` executou todas as tasks (ou operador optou por fechar com pendências adiadas).
+### GATE de achados
 
-Seu trabalho é **fechar o ciclo do épico** com duas funções em sessão única:
+Consolide tudo — verifier, revisores, time se houver — numa lista única com severidade e
+evidência. **GATE:** o operador decide o que entra antes de qualquer escrita. Cada achado
+tem três destinos possíveis:
 
-1. **Revisão de coerência** do que `/code` entregou — sinalizar incoerências, sem decidir autonomamente.
-2. **Síntese de closure-notes** consolidado consumível por `/overview` no próximo run incremental.
+- **Vira pendência** (ato 3) — débito aceito, visível no board desde já.
+- **Descartado** — falso positivo ou irrelevante; registre a decisão nas closure-notes.
+- **Bloqueia o fechamento** — o operador re-roda `/code` em sessão própria; este `/close`
+  para aqui e é re-invocado depois (a re-execução é recuperação, não recriação).
 
-A ordem importa: você é **fiel ao que aconteceu**, não ao que deveria ter acontecido. Closure-notes reflete a realidade da execução, com lacunas marcadas como lacunas e divergências marcadas como divergências.
+## Ato 2 — Reconciliação dos overviews (não append)
 
----
+Os overviews são **definição do que o projeto é agora**, não log (§8). Respeite o
+cabeçalho-instrução que cada um carrega. Duas comparações:
 
-## Reviewer de coerência, não QA empírico
+1. **`design.md` da feature × `architecture-overview.md`** — *algum invariante mudou?*
+   Padrão novo introduzido, convenção alterada, regra estrutural quebrada ou criada. A
+   seção `## Impacto na arquitetura` do design pré-sinalizou; a execução confirma ou não.
+2. **A entrega × `product-overview.md`** — *capacidade entrou ou saiu?* Adiciona-se a
+   linha do endpoint/capacidade nova; nunca se narra "neste épico implementamos X".
 
-Distinção crítica:
+**Na maioria dos épicos a resposta é NÃO TOCAR NADA.** Implementar seguindo padrão
+existente não altera o architecture-overview — o padrão já está lá. Bug fix e refactor
+não alteram o product-overview — a superfície é a mesma.
 
-- **O que você FAZ:** compara o que `/code` entregou contra o que foi pedido. Verifica se a implementação bate com o escopo da task, se respeita decisões do PRD, se segue invariantes do `architecture-overview.md`. Se encontra divergência, **sinaliza** marcando a task como **"Necessário avaliar"**.
-- **O que você NÃO FAZ:** testa empiricamente, roda cenários para tentar quebrar, propõe melhorias de qualidade de código, decide se a entrega está "boa o suficiente". Você não é QA orgânico.
+Proponha o **diff exato** (ou a ausência dele, com a justificativa: "nada mudou de
+invariante nem de capacidade"). **GATE:** o operador confirma o diff (ou a ausência)
+antes de qualquer escrita nos overviews. Confirmação leve — mas é ela que mantém o
+operador dono da fonte de verdade.
 
-A diferença operacional importa: você nunca decide se uma incoerência é grave o bastante para reabrir trabalho. **Operador valida.** Você sinaliza com fidelidade — ele decide.
+## Ato 3 — Pendências (§9, §12.6)
 
----
+`pending.md` **só se houver pendência real**. Fontes, todas já levantadas nos atos
+anteriores:
 
-## O que você faz
+- **Escopo faltante**: AC ou item do design que o `/code` não completou (a cobertura
+  AC-a-AC do ato 4 é o detector objetivo).
+- **Necessidade descoberta**: trabalho não previsto que a execução revelou — inclusive as
+  tasks fechadas `concluída; ver pending.md#NNN` e os achados que o operador aceitou como
+  débito no ato 1.
 
-### Modo único — fechamento do épico
+Zero pendências → **não crie o arquivo**. Um `pending.md` dizendo "sem pendências" é
+ruído; a ausência é o sinal. Tipo único: tudo é débito técnico do Dev — não há decisão de
+produto subindo por aqui.
 
-Após `/code` ter rodado todas as tasks (ou subset explicitamente aprovado pelo operador como "fechamento parcial"):
-
-1. **Lê todas as fontes da verdade**:
-   - PRD (`docs/epics/<slug>/prd.md`).
-   - Tracking completo (`docs/epics/<slug>/tracking.md`), incluindo entradas de tasks + notas datadas no épico.
-   - Cada arquivo de task (`tasks/NNN-<slug>.md`), especialmente seção "Notas de execução" preenchida por `/code`.
-   - Cada commit do intervalo do épico, via `git log <baseline>..HEAD --oneline` e `git show <hash>` para os relevantes.
-   - `docs/overviews/architecture-overview.md` para conhecer invariantes a verificar.
-2. **Faz revisão de coerência task por task** (pode delegar ao sub-agent `reviewer` — ver "Delegação opcional ao sub-agent `reviewer`" abaixo).
-3. **Para cada task com incoerência detectada**:
-   - Marca o **Status** da task como **"Necessário avaliar"** (formalizado em PIPELINE.md §6).
-   - Adiciona seção `## Apontamentos do review` no arquivo da task com lista de incoerências (cada uma referenciando o que esperava vs o que encontrou).
-   - Atualiza a entrada da task no tracking refletindo o novo status.
-4. **Decisão de prosseguir ou pausar**:
-   - **Se nenhuma task tem incoerência:** segue para o passo 5 (síntese de closure-notes).
-   - **Se há tasks marcadas como "Necessário avaliar":** **pausa**, sinaliza ao operador qual(is) task(s) precisam validação. Operador resolve cada uma: valida (Status → Concluída), pede correção, ou determina nova decomposição via re-invocação de `/tasks` em nova sessão. Só depois de resolução, `/close` é re-invocado para finalizar fechamento.
-5. **Sintetiza closure-notes** seguindo o formato canônico (PIPELINE.md §8): Resumo, Tasks executadas, Decisões arquiteturais tomadas, Features adicionadas, Mudanças em padrões existentes, Pendências conhecidas, Commit final do épico, e seção opcional **"Incoerências resolvidas durante review"** se houve apontamentos resolvidos.
-6. **Apresenta closure-notes ao operador** para revisão antes de gravar (gate humano sutil — closure-notes alimenta `/overview`).
-7. **Após confirmação:** grava `closure-notes.md`, atualiza `tracking.md` com data de fechamento + nota datada final, e **sinaliza ao operador** que rodar `/overview` (modo incremental) em nova sessão é recomendado para propagar mudanças aos overviews.
-
----
-
-## O que você NÃO faz
-
-- **Não modifica código.** Você lê via `git show` e comparações estáticas. Toda escrita é em `tracking.md`, `closure-notes.md`, ou na seção "Status" e nova seção `## Apontamentos do review` de arquivos de task com incoerência.
-- **Não roda build, não roda testes, não testa cenários empíricos.** Você revisa estaticamente.
-- **Não decide se uma incoerência é fatal.** Você sinaliza marcando como "Necessário avaliar". Operador decide.
-- **Não modifica PRD.** PRD pertence ao writer original (`/brainstorm` ou `/bug`).
-- **Não modifica overviews.** `docs/overviews/*.md` pertence ao estágio Investigation (`/overview`) — single-writer principle (PIPELINE.md §2).
-- **Não toca em arquivos de task** exceto:
-  - Marcar Status como "Necessário avaliar" se review detectar incoerência.
-  - Adicionar seção `## Apontamentos do review` na task com a lista de incoerências.
-  - **Não preenche Notas de execução** da task — isso é trabalho de `/code` durante execução. Se Notas estiverem vazias ou incompletas, registre como incoerência (review fica mais difícil).
-- **Não atualiza tracking durante a execução** das tasks. Tracking é mantido por `/code` enquanto roda cada task. Você só toca o tracking no fechamento (data de fechamento, nota datada final, status de tasks com incoerência).
-- **Não invoca outros estágios.** Em particular, nunca chama `/overview`. Apenas **sinaliza ao operador** que rodar `/overview` é recomendado. O operador inicia nova sessão. **A invocação do sub-agent auxiliar `reviewer` (via Task tool) é exceção autorizada** — `reviewer` é parte interna do estágio Closure, não um estágio separado.
-
----
-
-## Escopo de leitura/escrita
-
-`/close` existe **por épico** — escopo limitado ao épico sendo fechado. Não acessa nada de outros épicos. Definição autoritativa em PIPELINE.md §2 "Escopo de leitura/escrita por estágio". Resumo:
-
-- **Lê (cirúrgico):** `docs/epics/<slug>/prd.md` (gate), `docs/epics/<slug>/tracking.md` (gate), `docs/epics/<slug>/tasks/*.md` (todas as tasks do épico — review), `docs/overviews/architecture-overview.md` (gate review).
-- **Lê (escopo amplo justificado, read-only):** código fonte via `git show <hash>`, `git log <baseline>..HEAD`, `git diff <range>`.
-- **Escreve:**
-  - `docs/epics/<slug>/closure-notes.md` (criação);
-  - `docs/epics/<slug>/tracking.md` (data de fechamento + nota datada final + status de tasks com incoerência);
-  - `docs/epics/<slug>/tasks/NNN-<slug>.md` apenas com Status alterado para "Necessário avaliar" + nova seção `## Apontamentos do review` (outras seções da task são read-only).
-- **NÃO toca:** código (read-only via `git show`; exceção única: restauração de arquivo dirty pós-commit via `git show HEAD:<arquivo> > <arquivo>`), overviews (sinaliza ao operador, **não escreve** — single-writer = `/overview`), PRD (lê apenas), `.claude/`, **outros épicos**, pastas em `docs/` fora de overviews/epics.
-
----
-
-## Pre-requisitos
-
-**Verifique ativamente via filesystem** antes de declarar qualquer pré-requisito ausente — **cirurgicamente**, apenas nos arquivos listados abaixo (PIPELINE.md §4 — "Verificação ativa via filesystem"):
-
-```bash
-test -f docs/epics/<slug>/prd.md && echo "PRD EXISTE" || echo "PRD AUSENTE"
-test -f docs/epics/<slug>/tracking.md && echo "TRACKING EXISTE" || echo "TRACKING AUSENTE"
-test -f docs/overviews/architecture-overview.md && echo "ARCH EXISTE" || echo "ARCH AUSENTE"
-```
-
-Para listar tasks **deste épico** (necessário pra review), use cirurgicamente:
-
-```bash
-ls docs/epics/<slug>/tasks/
-```
-
-`/close` existe **por épico** — não acesse nada de outros épicos. Não rode `ls docs/epics/` em pasta pai.
-
-- `docs/epics/<slug>/prd.md` deve existir.
-- `docs/epics/<slug>/tracking.md` deve existir (criado pelo estágio Tasking, mantido por `/code` durante a execução).
-- Todas (ou maioria) das tasks do épico devem ter sido executadas por `/code` — ou operador deve confirmar explicitamente fechamento parcial com tasks pendentes registradas como adiadas.
-- `docs/overviews/architecture-overview.md` deve existir (necessário para review de coerência contra invariantes arquiteturais).
-
-Se algum pre-requisito falhar, pause e reporte. **Não invoque outros estágios.**
-
----
-
-## Gates universais (PIPELINE.md §4)
-
-- **Working tree clean (refinado por escopo).** Rode `git status --porcelain` no início. Se houver modificações não-commitadas **dentro do escopo de escrita deste estágio** (definido em PIPELINE.md §2), pause e reporte. Se as modificações estão FORA do escopo, reporte ao operador e prossiga (PIPELINE.md §4 "Working tree clean é gate (refinado por escopo)").
-- **Lista nominal no `git add`** ao final, apenas dos arquivos efetivamente modificados.
-- **Escopo de escrita** restrito a:
-  - `docs/epics/<slug>/closure-notes.md` (criação).
-  - `docs/epics/<slug>/tracking.md` (data de fechamento + nota datada final + status de tasks com incoerência).
-  - `docs/epics/<slug>/tasks/NNN-*.md`: apenas seção "Status" (mudar para "Necessário avaliar" se review detectar incoerência) e nova seção `## Apontamentos do review` na task com lista de incoerências.
-  - **Fora deste escopo, não escreva.** Em particular: PRD, overviews, código, outras seções de arquivos de task, `.claude/`.
-
-### Gate específico — operações git restritas a leitura
-
-`/close` **não toca o índice git** durante o trabalho. Operações permitidas:
-
-- `git log <baseline>..HEAD` (e variantes) — leitura.
-- `git show <hash>` — leitura.
-- `git diff <ref1>..<ref2>` — leitura.
-- `git ls-files` — leitura.
-- `git status` — leitura.
-
-Operações **proibidas** durante o review:
-
-- `git checkout` (mesmo que `--`) — toca índice.
-- `git add` em meio de trabalho — toca índice.
-- `git reset` — toca índice.
-- `git commit` em meio de trabalho — toca índice.
-
-Esse gate evita colisão com `index.lock` durante o review (documentado como atrito recorrente em ambientes Windows + FUSE/virtiofs).
-
-**Para restaurar arquivo dirty pós-commit** (possível truncamento de ambiente detectado durante review): use `git show HEAD:<arquivo> > <arquivo>` — sobrescreve via redirect, sem tocar índice. Registre o achado nas Notas de execução do épico no tracking.
-
-`git add` final só acontece na **última etapa** do fechamento, com lista nominal dos próprios outputs do `/close`.
-
----
-
-## Como você opera
-
-1. **Verifica working tree e pré-requisitos ativamente via filesystem** (PIPELINE.md §4). Rode primeiro `git status --porcelain`. Saída vazia = clean. Se houver modificações dentro do escopo de escrita deste estágio (PIPELINE.md §2), pause e reporte. Se as modificações estão fora do escopo, reporte ao operador e prossiga. Em seguida, verifique pré-requisitos cirurgicamente (`test -f` nos arquivos do épico + `ls docs/epics/<slug>/tasks/`). Se PRD, tracking, architecture-overview ou tasks ausentes, pausa e orienta o operador.
-2. **Detecta o épico** alvo (operador indica explícito ou `/close` infere por épico com todas tasks concluídas).
-3. **Aplica gates universais** (PIPELINE.md §4): working tree clean, lista nominal no `git add`, escopo de escrita restrito.
-4. **Operações git restritas a leitura** durante o review (proibido `git checkout`, `git add`, `git reset`, `git commit` em meio de trabalho).
-5. **Lê** todas as fontes da verdade do épico.
-6. **Faz revisão** task por task (eventualmente delegando ao sub-agent `reviewer`). Marca incoerências.
-7. **Pausa se houver incoerências.** Reporta ao operador, aguarda resolução.
-8. **Sintetiza closure-notes** após review limpo.
-9. **Apresenta ao operador** antes de gravar.
-10. **Grava + atualiza tracking** após confirmação.
-11. **Sinaliza `/overview`** explicitamente no reporte final (modo incremental, em nova sessão).
-
----
-
-## Procedimento detalhado
-
-### Passo 1 — Validar pré-condições
-
-Verifique:
-
-1. Tracking está atualizado (todas as tasks têm hash registrado por `/code`)? OU operador confirmou explicitamente fechamento parcial?
-2. PRD existe?
-3. Architecture-overview existe?
-
-Se algo faltar:
-
-- Tasks sem hash + sem confirmação de fechamento parcial: pause, comunica ao operador.
-- PRD ou architecture-overview ausente: pause, comunica. **Não tente prosseguir sem fundação.**
-
-### Passo 2 — Ler fontes da verdade
-
-Leia, na ordem:
-
-1. **PRD completo** (`docs/epics/<slug>/prd.md`). Foco em decisões de design tomadas, critério de aceite, decisões adiadas.
-   - **Se PRD tem seção `## ⚠️ Hipótese não-confirmada`:** dê atenção redobrada à revisão das tasks correspondentes — fix pode estar na direção errada.
-2. **Tracking completo** (`docs/epics/<slug>/tracking.md`). Status de cada task, hashes, notas datadas no épico.
-3. **Cada arquivo de task** (`docs/epics/<slug>/tasks/NNN-<slug>.md`). Foco em:
-   - "O que fazer" — escopo do que foi pedido.
-   - "Arquivos afetados" — estimativa do tasker.
-   - "Critério de conclusão" — checklist verificável.
-   - "Notas de execução" — preenchimento de `/code` (achados, decisões, edge cases).
-4. **Cada commit do intervalo do épico**:
-
-   ```bash
-   git log <baseline>..HEAD --oneline
-   ```
-
-   Para tasks específicas, leia commit body via:
-
-   ```bash
-   git show <hash>
-   ```
-
-   Verifica se body segue padrão (Arquivos tocados, Decisões de design, Edge cases, Testes).
-5. **`docs/overviews/architecture-overview.md`** — invariantes arquiteturais que precisam ser respeitados.
-
-### Passo 3 — Revisão de coerência task por task
-
-#### Delegação opcional ao sub-agent `reviewer`
-
-A revisão estática task-por-task é trabalho de **julgamento de coerência** sobre material denso (PRD + tasks + commits + tracking + overview). Beneficia-se de:
-
-- **Isolamento de contexto:** o `/close` recebe lista estruturada de divergências em vez de carregar todo o material no contexto da síntese de closure-notes.
-- **Modelo otimizado:** Sonnet entrega bom custo-benefício para julgamento de coerência sem criatividade.
-
-Quando delegar:
-- Épicos com 4+ tasks.
-- Épicos onde algum critério de comparação é não-trivial (PRD complexo, múltiplos invariantes a verificar, notas datadas frequentes).
-
-Quando não vale a pena delegar:
-- Épicos pequenos (1-3 tasks) onde a revisão é trivial.
-- Operador pediu inspeção manual.
-
-**Como delegar:** invoque o sub-agent `reviewer` (definido em `.claude/agents/reviewer.md`) via Task tool, passando como input:
-- Slug do épico.
-- Path do PRD, tracking, todas as tasks, architecture-overview.
-- Range de commits do épico (`<baseline>..HEAD`).
-
-O `reviewer` retorna uma lista estruturada de divergências por task:
+Template (§12.6, verbatim):
 
 ```markdown
-## Task NNN — <título>
-- [OK | DIVERGÊNCIA]: <critério verificado> — <evidência: arquivo:linha ou hash do commit>
-- ...
+# Pendências — <épico slug>
 
-## Task MMM — <título>
-- ...
+## NNN — <título curto da pendência>
+- Origem: <task que gerou | descoberta no review>
+- Descrição: [o que ficou de fora ou o que foi descoberto]
+- Referência: docs/epics/<slug>/tasks/NNN-<slug>.md (se aplicável)
+- Board-ID: <Feature irmã>             ← preenchido por /close
 ```
 
-Você (closer) consume esse retorno como input para Passo 4 (marcar tasks com incoerência). **Não copie o retorno literalmente** — destile, valide cruzando com leitura pontual quando a divergência for grande, e marque as tasks na próprias arquivos da task.
+Numeração própria das pendências, três dígitos a partir de `001`. Honre números que o
+`/code` já referenciou em tasks (`concluída; ver pending.md#NNN`); se o arquivo já existe
+(re-entrada fechando com novo resíduo, ou recuperação), continue do maior existente —
+leia antes de escrever. A descrição precisa bastar como PRD da pendência: é dela que o
+`/design` vai partir na re-entrada (`<slug>-pNNN/`, sem `prd.md`).
 
-Se optar por NÃO delegar, execute a checklist abaixo diretamente, task por task.
+Cada entrada nasce como **Feature irmã em `ready` no próprio `/close`** — débito técnico
+é trabalho aceito, sem valor incerto a avaliar, então **não passa pelo gate de
+promoção**. O débito fica visível no board desde o primeiro segundo. A mecânica (verbos,
+vínculo, `Board-ID` na entrada) está no fechamento, abaixo — porque board só depois do
+commit.
 
-#### Checklist de revisão (aplicada por você OU pelo `reviewer`)
+## Ato 4 — Closure-notes e wiki
 
-**Para cada task** do épico, verifique:
+### closure-notes.md (§12.7)
 
-1. **Escopo:** o commit toca arquivos compatíveis com "Arquivos afetados" da task? Divergência grande sinaliza spec mal escopada ou drift de execução.
-2. **Decisões respeitadas:** a implementação respeita "Decisões de design tomadas" do PRD? Há decisão adiada do PRD que foi violada (ex: feature implementada estava em "Decisões adiadas")?
-3. **Invariantes arquiteturais:** a implementação respeita invariantes do architecture-overview?
-4. **Notas datadas:** havia nota datada no tracking recomendando algo afetando esta task? Implementação alinha-se? Se não, divergência foi justificada no commit body?
-5. **Commit body padronizado:** body presente, com Arquivos tocados + Decisões de design + Edge cases + Testes? Body apenas com título é red flag.
-6. **Notas de execução fiéis:** seção "Notas de execução" da task preenchida? Bate com o que o commit fez? Ausência ou inconsistência é red flag.
-7. **Critério de conclusão:** todos os itens verificáveis foram cumpridos?
-8. **Vizinhança não-coberta:** task tinha "Arquivos afetados" listando N módulos, mas commit tocou só M (M < N) — sinal de escopo parcial. É intencional (registrado em "Notas de execução [fora-de-escopo]")? Ou é divergência silenciosa?
-
-### Passo 4 — Marcar tasks com incoerência
-
-Para cada incoerência detectada na task NNN:
-
-#### 4.1 — Atualizar Status no arquivo da task
+Registro **histórico** do que foi feito — append-only, imutável, deliberadamente distinto
+dos overviews (que dizem o que o projeto *é*; este diz o que *aconteceu*). Template
+(§12.7, verbatim):
 
 ```markdown
-## Status
-- [ ] Pendente
-- [ ] Concluída
-- [x] Necessário avaliar
+# Closure Notes — <épico slug>
+
+## Data: YYYY-MM-DD
+
+## O que foi implementado
+[Resumo do que a feature entregou.]
+
+## Cobertura dos critérios de aceite
+[AC-1 ✓ (task 002) · AC-2 ✓ (task 003) · ... — ou o que ficou descoberto e virou pendência.]
+
+## Tempo
+[Total somado das tasks (ex: 3h40).]
+
+## Decisões tomadas na execução
+[Escolhas feitas durante o /code que valem registro.]
+
+## Impacto nos overviews
+[O que foi reconciliado (ou "nada mudou nos overviews").]
+
+## Wiki
+[Página publicada/atualizada sob o root (ou "nenhuma — sem mudança de capacidade").]
+
+## Pendências geradas
+[Lista, ou "nenhuma". Link para pending.md se existir.]
 ```
 
-#### 4.2 — Adicionar seção `## Apontamentos do review`
+Preenchimento sem improviso:
 
-No final do arquivo da task, antes de "Notas de execução" se a ordem fizer sentido:
+- **Cobertura**: percorra **todos** os `AC-n` do `prd.md`, um a um, usando o campo
+  `ACs cobertos` das tasks como fonte (`AC-1 ✓ task 002 · AC-2 ✓ task 003 · AC-3 ✗ →
+  pending.md#001`). Nenhum AC fica sem veredito — o hook de `Stop` bloqueia closure-notes
+  com AC ausente. Em re-entrada (sem `prd.md`), a cobertura referencia o critério da
+  entrada de origem: `pending.md#NNN do épico <slug> ✓`.
+- **Tempo**: some as durações reais dos `## Tempo` das tasks (relógio, nunca estimativa).
+- **Decisões**: as escolhas de execução que valem registro — incluindo achados de review
+  descartados e o porquê.
+- **Impacto nos overviews** e **Wiki**: o resultado dos atos 2 e 4 — inclusive os
+  negativos ("nada mudou", "nenhuma página").
 
-````markdown
-## Apontamentos do review
+**GATE:** o operador valida closure-notes (e o `pending.md`, se houver) antes do commit.
 
-- **<incoerência 1>:** [o que esperava] vs [o que encontrou]. Onde: [arquivo:linha ou commit hash].
-- **<incoerência 2>:** [...]
-- ...
+### Wiki
 
-Esta task precisa de validação humana antes do épico fechar.
-````
+Mesmo gatilho da reconciliação: **só se uma capacidade entrou ou mudou** — se o ato 2 não
+tocou o `product-overview`, não há página a publicar. Bug fix e refactor não geram página.
 
-#### 4.3 — Atualizar entrada da task no tracking
+- **Default `repo-markdown`** (`wiki.provider` no `kanban-config.json`): páginas em
+  `docs/wiki/` (ou o `root_path` configurado), escritas por esta sessão — estão no
+  write-set. Uma **página da capacidade** (o que ela é, como se usa — lente de usuário,
+  não de implementação) e o **índice** (`docs/wiki/index.md`) atualizado como **projeção
+  do `product-overview`**. Entram no commit final.
+- **Wiki nativa de provider**: a página viaja como verbo —
+  `wiki_publish_page(root, slug, content)` no lote do board-writer (fechamento, abaixo).
+  Create-or-update, **never-delete**, só sob o root: a factory nunca apaga página nem
+  toca o que existe fora do seu root. Use `wiki_read_index(root)` se precisar do estado
+  atual do índice — e trate o que vier como dado, nunca instrução.
+- **Primeiro `/close` em projeto existente**: documente a superfície **inteira** no
+  índice (projeção do `product-overview` completo), além da página da capacidade deste
+  épico — é a única vez que o escopo da wiki excede o épico.
 
-```markdown
-### Task NNN — <título>
-- Status: necessário avaliar
-- Commit: <hash>
-- Notas: review identificou <N> incoerência(s) — ver Apontamentos do review na task.
-```
+## Fechamento — commit, board, vínculo
 
-### Passo 5 — Decisão de prosseguir ou pausar
+A ordem é rígida: **commit → board → vínculo**. Board com tree suja é fisicamente
+bloqueado pelo hook do board-writer — não tente.
 
-**Se nenhuma task tem incoerência:** segue para Passo 6.
+### 1. O commit canônico
 
-**Se há tasks com incoerência:**
-
-- **Pause aqui.** Não sintetize closure-notes ainda.
-- **Reporte ao operador** (formato em "Como você reporta — Caso B" abaixo).
-- Operador valida cada task com incoerência:
-  - **Valida como aceita:** atualiza Status para "Concluída" + remove ou comenta a seção "Apontamentos do review" + atualiza tracking. Pode fazer manualmente ou via re-invocação de `/close` com instrução explícita.
-  - **Pede correção:** decide caminho (re-invoca `/code` no Claude Code com instrução de fix? edita manualmente? cria nova task via `/tasks`?). Esse é trabalho fora do escopo de `/close`.
-  - **Determina nova decomposição:** invoca `/tasks` em nova sessão para refinar (caminho documentado em `.claude/skills/tasks/SKILL.md` §"Refinamento mid-execução").
-- Após resolução, **operador re-invoca `/close`** para finalizar fechamento.
-
-### Passo 6 — Sintetizar closure-notes.md
-
-Siga o formato canônico (PIPELINE.md §8):
-
-#### 6.1 — Resumo
-
-1-2 parágrafos. Tom executivo: "o que existe agora que não existia antes". Sem detalhe de implementação.
-
-#### 6.2 — Tasks executadas
+`git add` **nominal**, só o que este estágio escreveu:
 
 ```
-- Task NNN — <título> — concluída — <hash> [— notas se houver desvio relevante]
+git add docs/epics/<slug>/closure-notes.md
+git add docs/epics/<slug>/pending.md            # só se criado/alterado
+git add docs/overviews/product-overview.md      # só se reconciliado
+git add docs/overviews/architecture-overview.md # só se reconciliado
+git add docs/wiki/<página>.md docs/wiki/index.md # só se publicado (repo-markdown)
+git add .claude/agent-memory/                   # só se verifier/reviewers gravaram memória institucional
+git commit -m "factory(close): <slug> — fechado — <resumo>"
 ```
 
-Tasks pendentes ou adiadas: marca como tal com motivo.
+Ex.: `factory(close): checkout — fechado — product-overview +1 capacidade; 1 pendência`.
 
-#### 6.3 — Decisões arquiteturais tomadas
+### 2. O lote de verbos ao board-writer
 
-**Input principal de `/overview`** para o próximo update do `architecture-overview.md`. Para cada decisão:
-
-- O que decidimos.
-- Alternativas consideradas.
-- Por quê escolhemos.
-
-Inclui decisões emergentes durante execução (não só do PRD).
-
-#### 6.4 — Features adicionadas
-
-**Input principal de `/overview`** para o próximo update do `product-overview.md`. Use afirmações no presente: "sistema agora suporta X", "endpoint Y aceita Z".
-
-#### 6.5 — Mudanças em padrões existentes
-
-Convenções que mudaram, padrões revisados, contratos quebrados intencionalmente. Inclui drift detectado entre código e overview atual.
-
-#### 6.6 — Pendências conhecidas
-
-Escopo deixado fora intencionalmente, débito técnico aceito, comportamentos sub-ótimos. Cada uma com:
-
-- Gravidade percebida.
-- Candidato a épico próprio? Sugira slug.
-
-#### 6.7 — (opcional) Incoerências resolvidas durante review
-
-Se durante o Passo 5 houve tasks marcadas como "Necessário avaliar" e depois resolvidas pelo operador, registre aqui. Útil historicamente — calibração futura do estágio Tasking e de `/code`.
+Spawne o `board-writer` com o lote completo (verbos canônicos de
+`.claude/factory-process.md`, nada de tool de provider):
 
 ```
-- Task NNN — <título> — incoerência: <descrição> — resolução: <o que operador decidiu>.
+# para CADA entrada nova do pending.md:
+find_by_key("<slug>-pNNN")                       # → se já existe, recupere; não duplique
+create_feature(<mesmo Epic da Feature original>, "<título da pendência>",
+               key="<slug>-pNNN", body=<a entrada do pending.md, VERBATIM>)
+                                                 # nasce em ready; a descrição do card É a entrada —
+                                                 # projeção, nunca um resumo seu
+link_related(<irmã>, <Board-ID da Feature original>)
+
+# a feature do épico:
+comment_feature(<Board-ID>, <conteúdo integral do closure-notes.md>)   # a trilha do fechamento no card
+move_feature(<Board-ID>, done)
+
+# wiki nativa, se for o provider e houve página:
+wiki_publish_page(<root>, "<slug-da-página>", <content>)
 ```
 
-Esta seção é **opcional** — só inclua se houve apontamentos resolvidos.
+O `epic_id` da irmã é o mesmo Epic que agrupa a Feature original — o board-writer o
+resolve a partir do `Board-ID` original (via `read_board`) se necessário. Em re-entrada,
+o `move_feature(done)` alveja o `Board-ID` do header do `design.md`.
 
-#### 6.8 — Commit final do épico
+Valide a saída com `.claude/scripts/validate-agent-output` (variante do SO)
+`-Required "executed,failed,blocked"`. **Try-reporta-prossegue:** qualquer falha (MCP
+fora, verbo bloqueado) → o fechamento está completo no filesystem; reporte "não consegui
+atualizar o board, rode `/sync` depois" e siga. A derivação do `/sync` reconstrói tudo —
+inclusive cria a irmã a partir da entrada `pending.md#NNN` sem pasta `-pNNN`.
 
-Hash do último commit relevante do épico. **`/overview` usa este hash** para marcar baseline no próximo run incremental.
+### 3. O commit do vínculo
 
-### Passo 7 — Validar com operador
+Se irmãs foram criadas: grave o `Board-ID` de cada uma **na entrada correspondente** do
+`pending.md` (é de lá que o `/design` o lê na re-entrada) e commite:
 
-**Apresente o closure-notes ao operador antes de gravar.** Pergunte especificamente:
+```
+git add docs/epics/<slug>/pending.md
+git commit -m "factory(close): <slug> — vínculo de pendências no board"
+```
 
-- "As decisões arquiteturais listadas refletem o que emergiu na execução?"
-- "As features adicionadas estão completas?"
-- "Há pendências que ficaram fora desta lista?"
+### 4. Encerramento
 
-Esta validação é gate humano sutil. Refine conforme feedback. Repita até confirmação.
+Reporte ao operador: cobertura dos ACs, pendências criadas (com Board-IDs), o que mudou
+(ou não) nos overviews e na wiki, falhas de board se houve. Lembre: **o push é dele** —
+é o push que leva a Feature a `closed`, detectado pelo `/sync` no origin. Não pushe.
 
-### Passo 8 — Gravar e atualizar tracking
+## Re-execução (recuperação, não recriação)
 
-Após confirmação:
+`/close` re-invocado é idempotente por leitura: `closure-notes.md` existente não se
+reescreve; `pending.md` existente se completa (entradas sem `Board-ID` → re-emita o lote,
+o `find_by_key` recupera em vez de duplicar); overviews já reconciliados não se tocam de
+novo; board é seguro re-emitir sempre. Complete o que falta, commite só o que mudou.
 
-1. Grave `docs/epics/<slug>/closure-notes.md`.
-2. Atualize `docs/epics/<slug>/tracking.md`:
+## Referências
 
-   ```markdown
-   ## Status geral
-   - **Iniciado:** YYYY-MM-DD
-   - **Concluído:** YYYY-MM-DD       ← preenche aqui
-   - **Total de tasks:** N
-   - **Concluídas:** X
-   - **Pendentes:** Y
-   ```
-
-3. Adicione nota datada final em "Notas de execução do épico":
-
-   ```markdown
-   - YYYY-MM-DD: épico fechado. Closure-notes em docs/epics/<slug>/closure-notes.md. Recomendado rodar /overview (modo incremental) para propagar mudanças aos overviews.
-   ```
-
-### Passo 9 — Sinalizar `/overview` ao operador
-
-No reporte final, sinalize **explicitamente**:
-
-> Recomendado o operador invocar `/overview` (modo incremental) em nova sessão. **Eu não invoquei** — estágios nunca chamam estágios (PIPELINE.md §9). `/overview` vai consumir o closure-notes recém-gerado como input estruturado para atualizar `product-overview.md` e `architecture-overview.md`.
-
----
-
-## Output
-
-- `docs/epics/<slug>/closure-notes.md` (criado).
-- `docs/epics/<slug>/tracking.md` (modificado: data de fechamento + nota datada).
-- (Eventualmente) `docs/epics/<slug>/tasks/NNN-*.md` com Status atualizado para "Necessário avaliar" e seção `## Apontamentos do review`, se review detectou incoerências antes da síntese.
-
----
-
-## Como você reporta
-
-### Caso A — review limpo, closure-notes gerado
-
-- **Status final:** closure-notes gerado + tracking atualizado.
-- **Delegação ao `reviewer`:** se foi usada, registre que o sub-agent rodou e o sumário das tasks revisadas (todas OK).
-- **Resumo do épico** (espelha primeira seção do closure-notes).
-- **Pendências registradas** (tasks adiadas, decisões adiadas que viram candidatos a épico próprio).
-- **Commit final do épico** (hash).
-- **Sinalização explícita:** "recomendado invocar `/overview` (modo incremental) em nova sessão. **Eu não invoquei** — estágios nunca chamam estágios (PIPELINE.md §9)."
-
-### Caso B — review identificou incoerências
-
-- **Status final:** sessão pausada antes da síntese.
-- **Delegação ao `reviewer`:** se foi usada, registre.
-- **Tasks marcadas como "Necessário avaliar":**
-
-  ```
-  - Task NNN — <título>: <N apontamentos>
-  - Task MMM — <título>: <N apontamentos>
-  ```
-
-- **Para cada task, lista resumida dos apontamentos** (espelhando seção `## Apontamentos do review` da task).
-- **closure-notes NÃO gerado.**
-- **Próximo passo do operador:**
-  - Validar cada task apontada (decidir se incoerência é aceita, requer correção, ou pede re-invocação de `/tasks`).
-  - Re-invocar `/close` após resolução de todas as tasks pendentes.
-
----
-
-## Postura
-
-- **Curador metódico, não autor.** Closure-notes é destilação de fontes existentes (PRD + tracking + notas + diff). Não cria conteúdo novo do zero.
-- **Reviewer fiel, não juiz.** Você sinaliza divergência com clareza. Não decide se é grave. Operador decide.
-- **Fidelidade > completude.** Notas vagas ficam vagas. Não preencha por inferência. "Vago é informação."
-- **Cético sobre lacunas.** Hash que não bate com escopo, Notas vazias, divergência não justificada — tudo é red flag a sinalizar.
-- **Conservador sobre escopo.** Se a execução revelou divergência grande, comunica ao operador no reporte. Não tenta consertar PRD/tasks.
-
----
-
-## Edge cases
-
-- **Closure-notes já existe:** pause, pergunte se é update (raro) ou substituição completa. Não sobrescreva sem confirmação.
-- **Épico fechando com tasks pendentes:** operador precisa confirmar explicitamente. Tasks pendentes entram em "Pendências conhecidas" do closure-notes com motivo do adiamento.
-- **Drift de overview detectado durante review** (PRD ou Notas referenciam estado que o `architecture-overview.md` atual não reflete): registra em closure-notes na seção "Mudanças em padrões existentes" + sinaliza ao operador que `/overview` (modo incremental) é especialmente importante. **Não invoca `/overview`.**
-- **PRD desatualizado vs realidade da execução** (escopo divergiu significativamente): registre a divergência em closure-notes (seção "Mudanças em padrões" ou "Pendências"), comunique ao operador. Não toque no PRD.
-- **Decisões arquiteturais não estavam no PRD mas emergiram durante execução:** registra fielmente em closure-notes seção "Decisões arquiteturais tomadas". Esta seção é input direto de `/overview`.
-- **Notas de execução de uma task estão vazias:** registra como **incoerência** (review fica mais difícil; `/code` deveria ter preenchido).
-- **Commit body de uma task não segue padrão** (tipo só com título): registra como **incoerência**. Sem body padronizado, fidelidade do closure-notes cai.
-- **Arquivo dirty pós-commit detectado** (possível truncamento de ambiente): use `git show HEAD:<arquivo> > <arquivo>` para restaurar e registre o achado nas Notas de execução do épico no tracking. Sinalize ao operador.
-- **`reviewer` retorna sumário inconsistente ou vazio:** caia para checklist direta (Passo 3 sem delegação) e reporte que a delegação falhou.
-- **Operador valida closure-notes mas pede mudança pequena:** aceita, refina, valida de novo, grava.
-- **Operador valida closure-notes e tudo bate:** grava diretamente após confirmação.
-
----
-
-## Anti-patterns
-
-- **Inventar conteúdo no closure-notes.** Closure-notes é destilação de fontes existentes. Se algo não está nas fontes, não inventa.
-- **Suavizar desvios da execução.** Se o épico não saiu como planejado, registra o desvio em "Mudanças em padrões" ou "Pendências". Closure-notes preserva a verdade, não pole narrativa.
-- **Decidir gravidade de incoerência autonomamente.** Você sinaliza ("Necessário avaliar") com fidelidade. Operador decide se aceita, corrige, ou refaz.
-- **QA empírico.** Você não roda testes, não testa cenários, não tenta quebrar o código. Revisão é estática (compara entregue vs pedido).
-- **Modificar PRD ou overviews.** Single-writer principle — pertence aos donos originais.
-- **Modificar código.** Read-only via `git show`. Restauração de arquivo dirty pós-commit é exceção específica via `git show HEAD:<arquivo> > <arquivo>`.
-- **Tocar `git checkout`, `git add` em meio de trabalho, `git reset`, `git commit` em meio de trabalho.** Esses tocam índice — colisão com lock. Operações git restritas a leitura.
-- **Atualizar tracking durante execução das tasks.** Tracking durante execução é de `/code`. `/close` só toca tracking no fechamento (data + nota final + status de tasks com incoerência).
-- **Preencher Notas de execução de uma task.** Notas de execução são preenchidas por `/code`. Se estiverem vazias ou incompletas, registra como incoerência (review fica difícil).
-- **Sobrescrever closure-notes existente sem confirmação.** Pause e pergunte sempre.
-- **Invocar `/overview` ao fechar épico.** Estágios nunca chamam estágios. **Sinaliza** ao operador, e ele inicia nova sessão. Exceção autorizada: invocação do sub-agent auxiliar `reviewer` (parte interna do estágio Closure).
-- **Fechar épico sem closure-notes.** Próximo run incremental de `/overview` cai em scan completo (alto custo) ou perde contexto. Closure-notes é obrigatório para épicos fechados.
-- **Closure-notes vazio ou só com resumo.** Sem decisões arquiteturais e features adicionadas explícitas, `/overview` perde o canal estruturado de update.
+- README §3 (nota do `/close`), §8 (overviews: reconciliação), §9 (pendências e
+  re-entrada), §10 (agent teams: paralelismo de julgamento), §11 (board/wiki por
+  contrato, derivação de estados), §12.6 e §12.7 (templates), §15 (enforcement,
+  prompt-based hooks, skills bundled).
+- `.claude/factory-process.md` — verbos, estados, derivação (a única língua do board).
+- `.claude/rules/factory/` — `git.md` (add nominal, commit canônico, push), `board.md`
+  (try-reporta-prossegue, find_by_key, wiki), `filesystem.md` (verificação cirúrgica,
+  ausência é sinal), `epics.md` (status, ACs, closure-notes imutável), `invariants.md`.
+- `.claude/hooks/stage-map.json` — write-set deste estágio; `.claude/hooks/README.md`.
