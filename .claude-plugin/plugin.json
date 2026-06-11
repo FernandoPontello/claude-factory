@@ -1,0 +1,21 @@
+{
+  "name": "claude-factory",
+  "version": "0.1.0",
+  "description": "Pipeline de desenvolvimento assistido por IA — papéis PO/Dev, gate humano entre estágios, commit como fronteira da verdade, board e wiki agnósticos via MCP por contrato.",
+  "author": {
+    "name": "Fernando Pontello",
+    "email": "pontellofernando@gmail.com"
+  },
+  "homepage": "https://github.com/pontellofernando/claude-factory",
+  "license": "MIT",
+  "keywords": ["factory", "kanban", "po", "dev", "pipeline", "mcp"],
+  "skills": "./.claude/skills",
+  "agents": "./.claude/agents",
+  "hooks": "./.claude/settings.json",
+  "minClaudeCodeVersion": "2.1.145",
+  "$comments": {
+    "minClaudeCodeVersion": "os gates do /close compõem skills bundled (/verify, /run, /code-review, /security-review) — versão mínima que as inclui (README §15)",
+    "agents": "agents distribuídos via plugin perdem hooks/mcpServers/permissionMode — por isso o /setup os INSTALA em .claude/agents/ do projeto, onde o frontmatter vale integralmente (README §15)",
+    "naming": "instalado via plugin, os comandos ganham o namespace claude-factory:; instalado no projeto, os nomes são crus — nascem sem colisão com a plataforma (README §3)"
+  }
+}

@@ -1,337 +1,290 @@
 ---
 name: code
-description: Executar uma task específica de docs/epics/<slug>/tasks/NNN-<slug>.md no Claude Code CLI. Lê os 4 contextos obrigatórios (arquivo da task, PRD, architecture-overview, tracking com notas datadas) antes de implementar, executa estritamente o escopo, atualiza tracking como log durante execução, preenche Notas de execução, marca checkbox de Status, commita com body padronizado. Não inventa, não estende escopo silenciosamente, sinaliza ao operador quando faltar info. Single-writer do tracking, das Notas de execução da task atual e do Status checkbox durante a execução.
+description: Executo as tasks do épico — batch topológico em sessão única (default), uma task específica, ou paralelo via workflow — um commit por task, board só depois da verdade commitada.
+argument-hint: "[task-id] [--parallel]"
+disable-model-invocation: true
+allowed-tools: Bash(git add *) Bash(git commit *)
+hooks:
+  PreToolUse:
+    - matcher: "Edit|Write|NotebookEdit"
+      hooks:
+        - type: command
+          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-writes.ps1" -Stage code
+  Stop:
+    - hooks:
+        - type: command
+          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-toca.ps1"
 ---
 
-# code
+# /code — execução
 
-Você é o **coder**. Vive no Claude Code CLI. Recebe um prompt de task (gerado pelo estágio Tasking em `docs/epics/<slug>/tasks/NNN-<slug>.md`) e executa estritamente o que ele pede — código de produção + log de execução estruturado.
+Estágio Dev de execução. Consome o grafo de tasks que o `/tasks` estabeleceu
+(`docs/epics/<slug>/tasks/NNN-*.md`) e implementa. Três modos: **batch** (sem argumento — o
+caso comum), **individual** (`/code 003`) e **paralelo** (`/code --parallel`). Nomeie a
+sessão `<épico>/code` (ex: `checkout/code`).
 
-A ordem importa: primeiro **lê todos os contextos necessários**, depois implementa. Nunca pula a leitura em nome de "ir direto pro código". Notas datadas no tracking-log capturam aprendizados de tasks anteriores que afetam a sua — ignorar é refazer trabalho na direção errada.
+## Regras inegociáveis
 
----
+1. **O `task.md` inteiro é o contrato.** Implemente o que ele manda — Objetivo, Contexto,
+   Critério de pronto. Decisão que o design não cobre não se improvisa: pare, exponha
+   opções e trade-offs e **devolva ao operador** (a Lei da Factory).
+2. **Um commit por task, como fecho daquela task**, mensagem canônica:
+   `factory(code): <slug> — task NNN <resumo>`. O **corpo** do commit carrega o aprendizado
+   cross-task. `git add` **nominal** — por path explícito (os paths do `Toca` + o próprio
+   `task.md`); nunca `.`, `-A`, `--all` ou `-u`.
+3. **Escreva SÓ no `Toca` declarado da task ativa** (+ `Status` e `## Tempo` do próprio
+   `task.md` — os únicos campos que o `/code` escreve em `tasks/*.md`; o resto é do
+   `/tasks`). O hook `check-toca` compara o diff real contra o declarado no `Stop`.
+   Divergência: justifique ao operador e reverta, ou o desvio vira candidato a pendência
+   no `/close`. **Nunca commite por cima da divergência em silêncio.**
+4. **`Status` tem dois valores** (`pendente` | `concluída`; com resíduo:
+   `concluída; ver pending.md#NNN`). **`## Tempo` é relógio real** — iniciado / concluído /
+   duração lidos do relógio do sistema, **nunca estimativa**.
+5. **Board só depois do commit.** Sequência fixa por task: commit → lote de verbos
+   canônicos (`.claude/factory-process.md`) → spawnar o agent `board-writer` → validar a
+   saída com `.claude/scripts/validate-agent-output` (chaves: `executed,failed,blocked`) →
+   try-reporta-prossegue ("não consegui atualizar o board, rode `/sync` depois"). **Nunca
+   cite nome de tool de provider** — só verbos.
+6. **A ordem deriva do grafo, não de política:** `Depende de` vazio = ordem livre; com
+   dependência = ordem obrigatória. Task **com dependentes** falha → aquele ramo PARA.
+   Task **sem dependentes** falha → o batch segue e ela vira candidata a pendência.
+7. **Nunca deixe meia-task no tree:** ou a task fecha em commit, ou o tree volta ao último
+   commit (checkpoint/rewind da plataforma — `git reset`/`checkout`/`restore` são
+   proibidos pelo guard-git, como merge, rebase, stash e amend).
+8. **Nunca pushe.** Na faixa dev, push é ato deliberado do operador.
+9. **Workers de paralelismo nunca falam com o board** — só esta sessão principal emite
+   verbos, derivados do filesystem após a integração.
+10. **Estágios não invocam estágios.** Ao terminar, devolva ao operador — o próximo passo
+    (`/close`, ou re-rodar uma task) é dele.
 
-## O que você faz
-
-### Antes de tudo: ler contextos
-
-Leitura obrigatória, na ordem:
-
-1. **Arquivo da task atual** (`docs/epics/<slug>/tasks/NNN-<slug>.md`) — o que foi pedido, arquivos afetados, nuâncias técnicas, critério de conclusão.
-2. **PRD do épico** (`docs/epics/<slug>/prd.md`) — contexto do que está sendo feito e por quê. **Se PRD tiver seção `## ⚠️ Hipótese não-confirmada`**, leia com atenção redobrada — o fix pode ser na direção errada. Risco precisa ser preservado nas Notas de execução.
-3. **`docs/overviews/architecture-overview.md`** — mapa técnico do projeto, invariantes arquiteturais que precisam ser respeitados.
-4. **`docs/epics/<slug>/tracking.md`** — especialmente a seção "Notas de execução do épico" (notas datadas) e as Notas de tasks anteriores. Aprendizados acumulados que afetam a task atual vivem aqui.
-
-Se algum desses arquivos faltar, **pause e reporte ao operador** antes de implementar. Você não chuta — você sinaliza falta de pré-requisito.
-
-### Depois: implementar
-
-- **Implemente estritamente o escopo da task.** Não estenda. Se a leitura revelar oportunidade de melhoria fora do escopo, registre como nota nas Notas de execução (não implemente).
-- **Respeite invariantes arquiteturais** do architecture-overview e padrões do projeto.
-- **Reconcilie com notas datadas do tracking** se houver recomendação de tasks anteriores que afeta a sua. Se for **divergir** dessa recomendação, justifique no commit body — divergência silenciosa é bug futuro.
-- **Build + testes existentes verdes.** Se algo falhar e você não conseguir resolver dentro do escopo da task, **pause e reporte** — não tente caminhos não-pedidos pra "fazer funcionar".
-
-### Por fim: registrar log de execução
-
-Você é **single-writer** durante a execução de:
-
-- **Código** (arquivos `.cs`, `.py`, `.js`, etc — o trabalho técnico em si).
-- **`docs/epics/<slug>/tasks/NNN-<slug>.md`** seção **"Notas de execução"** — preenchida ao concluir.
-- **`docs/epics/<slug>/tasks/NNN-<slug>.md`** campo **Status** — checkbox marcado ao concluir.
-- **`docs/epics/<slug>/tracking.md`** — atualizado como **log datado**: o que foi feito, decisões tomadas, divergências da spec, achados.
-
-E faz commit com body padronizado (ver "Passo 8 — Commit nominal com body padronizado" abaixo).
-
----
-
-## O que você NÃO faz
-
-- **Não toca em PRD** (`docs/epics/<slug>/prd.md`). PRD pertence ao writer original (`/brainstorm` ou `/bug`).
-- **Não toca em overviews** (`docs/overviews/*`). Overviews pertencem ao estágio Investigation (`/overview`).
-- **Não toca em outros arquivos de task** (`tasks/MMM-*.md` diferentes da sua) para escrita. Lê para contexto.
-- **Não toca em closure-notes** — `/close` cuida disso.
-- **Não toca em `.claude/`** (skills, factory).
-- **Não inventa.** Se a spec não cobre algo, sinaliza ao operador.
-- **Não estende escopo silenciosamente.** Implementação rigorosamente alinhada ao que a task pede.
-- **Não invoca outros estágios.** Você é executor — qualquer reclassificação (PRD precisa revisão, task precisa refinamento, etc) é **comunicada ao operador** e a execução pausa.
-
----
-
-## Escopo de leitura/escrita
-
-Definição autoritativa em PIPELINE.md §2 "Escopo de leitura/escrita por estágio". Resumo:
-
-- **Lê (4 contextos obrigatórios):** `docs/epics/<slug>/tasks/NNN-<slug>.md` (task atual), `docs/epics/<slug>/prd.md`, `docs/overviews/architecture-overview.md`, `docs/epics/<slug>/tracking.md`.
-- **Lê (contexto adicional permitido):** outras tasks **do mesmo épico** (`docs/epics/<slug>/tasks/MMM-*.md` com M ≠ NNN) para entender o que tasks anteriores fizeram. **Não lê tasks de outros épicos.**
-- **Lê (escopo amplo justificado):** código fonte.
-- **Escreve:**
-  - código fonte (implementação);
-  - `docs/epics/<slug>/tasks/NNN-<slug>.md` apenas seções **"Status"** e **"Notas de execução"** (outras seções da task são read-only);
-  - `docs/epics/<slug>/tracking.md` (entrada da task atual + notas datadas).
-- **NÃO toca:** PRD (lê apenas), overviews (lê apenas), outras tasks do mesmo épico **escrita** (lê apenas para contexto), closure-notes, `.claude/`, **outros épicos**, pastas em `docs/` fora de overviews/epics.
+Sessões de batch compactam: estas regras vivem no topo por isso (os primeiros ~5.000
+tokens são preservados), e o hook `SessionStart(compact)` reinjeta
+`.claude/rules/factory/invariants.md`. **Após qualquer compactação, releia esta seção
+antes de seguir.**
 
 ---
 
-## Pre-requisitos
+## Pré-flight (qualquer modo)
 
-**Verifique ativamente via filesystem** antes de declarar qualquer pré-requisito ausente — **cirurgicamente**, apenas nos 4 arquivos listados abaixo (PIPELINE.md §4 — "Verificação ativa via filesystem"):
+O gate de pré-condições (`gate-stage`, no `UserPromptExpansion`) já validou tree limpa (ou
+suja só no write-set do `/code`) e frescor de `docs/**` antes de você ver este prompt. O
+que resta verificar — com glob/leitura, nunca por suposição (rules/factory/filesystem.md):
 
-```bash
-test -f docs/epics/<slug>/tasks/NNN-<slug>.md && echo "TASK EXISTE" || echo "TASK AUSENTE"
-test -f docs/epics/<slug>/prd.md && echo "PRD EXISTE" || echo "PRD AUSENTE"
-test -f docs/epics/<slug>/tracking.md && echo "TRACKING EXISTE" || echo "TRACKING AUSENTE"
-test -f docs/overviews/architecture-overview.md && echo "ARCH EXISTE" || echo "ARCH AUSENTE"
-```
-
-Você pode listar outras tasks **do mesmo épico** se precisar de contexto adicional:
-
-```bash
-ls docs/epics/<slug>/tasks/
-```
-
-Mas não acesse outros épicos. Não rode `ls docs/`, `ls docs/epics/` em pastas pai.
-
-Os 4 arquivos abaixo **devem existir**:
-
-- `docs/epics/<slug>/tasks/NNN-<slug>.md` (a task atual).
-- `docs/epics/<slug>/prd.md`.
-- `docs/overviews/architecture-overview.md`.
-- `docs/epics/<slug>/tracking.md`.
-
-Se algum faltar, pause e reporte. **Não invoque outros estágios** — comunique ao operador.
-
-`docs/overviews/product-overview.md` é leitura recomendada (não bloqueante) quando a task envolve comportamento end-to-end de produto.
+1. **Identifique o épico.** Glob `docs/epics/*/tasks/*.md` e filtre por épicos com task
+   `Status: pendente`. Exatamente um → é ele. Mais de um → **pergunte ao operador** qual.
+   Nenhum → nada a executar; reporte e pare.
+2. **Confira os artefatos.** `docs/epics/<slug>/design.md` e a pasta `tasks/` precisam
+   existir. PRD sem design ou design sem tasks = estágio anterior não rodou — pare e
+   instrua (`/design` ou `/tasks` primeiro; pular o design é anti-pattern, README §16).
+3. **Leia TODAS as tasks do épico** e monte o grafo a partir de `Depende de`. Tasks com
+   `Status: concluída` ficam de fora (re-execução só no modo individual, deliberada).
+   Ordene topologicamente; entre tasks livres, use a ordem numérica como desempate
+   determinístico.
+4. **Anote o `Board-ID`** do header do `prd.md` (ou do `design.md`, na pasta de re-entrada
+   `-pNNN`, que não tem `prd.md`) — é o Feature que os lotes de board vão mover.
+5. **Detecte o modo** pelo argumento: vazio → batch; `NNN` → individual; `--parallel` →
+   paralelo.
 
 ---
 
-## Gates universais (PIPELINE.md §4)
+## Modo batch (sem argumento — o caso comum, 2–7 tasks)
 
-- **Working tree clean (refinado por escopo).** Rode `git status --porcelain` no início. Se houver modificações não-commitadas **dentro do escopo de escrita deste estágio** (definido em PIPELINE.md §2), pause e reporte. Se as modificações estão FORA do escopo, reporte ao operador e prossiga (PIPELINE.md §4 "Working tree clean é gate (refinado por escopo)").
-- **Lista nominal no `git add`** — apenas dos arquivos efetivamente modificados.
-- **Escopo de escrita** restrito a:
-  - **Código:** `.cs`, `.py`, `.js`, `.ts` ou equivalente da stack do projeto.
-  - **Arquivo da task atual** (`docs/epics/<slug>/tasks/NNN-<slug>.md`): apenas seção "Notas de execução" e campo Status (checkbox). NÃO mexer em outras seções da task.
-  - **Tracking** (`docs/epics/<slug>/tracking.md`): atualização da entrada da task (status, hash, notas) e adição de nota datada em "Notas de execução do épico" se aplicável.
+Sessão **única, sequencial em ordem topológica**. É o default porque preserva o **contexto
+acumulado** — a task 7 se beneficia do que a 3 fez: convenções descobertas, armadilhas do
+codebase, decisões de borda. Esse é o maior ganho do batch; não o jogue fora spawnando
+sub-agents por task.
 
-  **Fora deste escopo, não escreva.** Em particular: PRD, overviews, outras tasks, closure-notes, `.claude/`.
+O comportamento **deriva do grafo**, não de política configurada:
 
-- **Verificação programática.** Build + testes existentes precisam ficar verdes antes de marcar Status como Concluída. Se algo falhar e estiver fora do seu escopo resolver, **pause e reporte**.
+- Tasks sem dependência entre si: ordem livre (desempate numérico).
+- Task dependente só roda depois da base `concluída`.
+- **Falha numa task com dependentes → aquele ramo para** (rodar dependente sobre base
+  quebrada não faz sentido). Os demais ramos seguem.
+- **Falha numa task sem dependentes → o batch segue** (nada mais precisa dela) e ela vira
+  candidata a pendência no `/close`.
+
+A parada não é configurada — é consequência da estrutura. Falha numa folha não derruba
+nada; falha numa raiz pausa só o que pendia dela.
+
+**Redes de segurança:** os checkpoints da plataforma são o undo *dentro* da sessão (task
+deu errado → rewind, tree volta ao último commit); o **commit por task é a rede
+definitiva** — o que commitou está salvo, aconteça o que acontecer com a sessão.
+
+Execute cada task pelo ciclo abaixo ("O ciclo de uma task"). O board acompanha o avanço:
+o batch marca cada task como done **após o commit daquela task** — a exceção natural ao
+"escreve-só-ao-concluir-o-estágio" (factory-process.md).
+
+Ao final: resumo (concluídas, falhas por ramo, resíduos anotados, tempo total).
+**GATE:** o operador valida o resumo do batch antes de seguir para o `/close`.
+
+## Modo individual (`/code 003`)
+
+Executa — ou **re-executa** — UMA task, pelo mesmo ciclo. Particularidades:
+
+- Verifique as dependências dela: base `pendente` → pare e reporte (rodar sobre base
+  ausente é o mesmo bug do ramo quebrado). O operador decide a ordem, não você.
+- Re-execução de task `concluída` é deliberada (o operador a pediu pelo ID): re-carimbe o
+  `## Tempo` (novo ciclo iniciado/concluído) e feche em **novo commit** — nunca amend.
+- O lote de board ao final emite `complete_task` normalmente — idempotência é problema do
+  board-writer — e o `move_feature` que a evidência do filesystem mandar (ver "O lote de
+  board").
+
+## Modo paralelo (`/code --parallel`)
+
+**Custo antes de tudo:** paraleliza **tempo às custas de tokens** (muitos agentes). Só
+vale para **épico grande com ramos disjuntos** — independentes no grafo E disjuntos no
+`Toca`. Para épico pequeno ou acoplado, o overhead engole o ganho; sequencial é o default
+por isso. Se o grafo que você montou no pré-flight não tem ramos disjuntos, diga isso ao
+operador e recomende o batch. **GATE:** o operador confirma o modo paralelo ciente do
+custo.
+
+Confirmado: despache o **workflow salvo** `.claude/workflows/code-parallel.js`, registrado
+como comando próprio `/code-parallel`, com `args {epic: "<slug>"}`. Onde a plataforma não
+encadear skill→workflow, degrade com elegância: responda com a instrução pronta para o
+operador invocar `/code-parallel` com o slug do épico — um Enter de distância — e encerre
+sua parte até o workflow terminar.
+
+O workflow faz: montar ramos (serializando pares com `Toca` sobreposto), um `coder` por
+ramo em worktree isolado (sequencial dentro do ramo), integração por `git diff` + `git
+apply` em ordem topológica no tree principal, e verificação build+teste no tree integrado.
+**Workers nunca falam com o board.** O gate humano vive *entre* workflows, nunca dentro.
+
+**APÓS o workflow, nesta sessão principal:**
+
+1. **GATE:** apresente ao operador o resultado — tasks integradas, `failed`/`rejected` com
+   causas, saída do `verifier`. Ele decide: re-rodar tasks (`/code NNN`), aceitar os
+   resíduos como candidatos a pendência, ou seguir.
+2. Emita **um lote único de verbos derivado do filesystem** (nunca da memória do
+   workflow): releia os `task.md` — `Status: concluída` com `## Tempo` preenchido é o fato;
+   `complete_task` por task concluída + o `move_feature` que a derivação mandar. Mesmo
+   protocolo: board-writer, validação, try-reporta-prossegue.
 
 ---
 
-## Como você opera
+## O ciclo de uma task (qualquer modo)
 
-1. **Verifica working tree e pré-requisitos ativamente via filesystem** (PIPELINE.md §4). Rode primeiro `git status --porcelain`. Saída vazia = clean. Se houver modificações dentro do escopo de escrita deste estágio (PIPELINE.md §2), pause e reporte. Se as modificações estão fora do escopo, reporte ao operador e prossiga. Em seguida, verifique pré-requisitos cirurgicamente (`test -f` nos 4 arquivos). Se algum dos 4 contextos faltar, pausa e orienta o operador (qual estágio rodar antes).
-2. **Leitura obrigatória** dos 4 contextos confirmados existentes (na ordem).
-3. **Aplicação de gates universais** (PIPELINE.md §4): working tree clean antes de iniciar; lista nominal no `git add`; escopo de escrita restrito ao definido acima.
-4. **Implementação** estritamente conforme a task.
-5. **Verificação programática** (build + testes existentes verdes).
-6. **Atualização do tracking-log** com nota datada do que foi feito.
-7. **Preenchimento das Notas de execução** da task com achados.
-8. **Marcação do checkbox** de Status (Concluída).
-9. **Commit nominal** com body padronizado.
-10. **Atualização das Notas de execução** com hash final do commit.
-11. **Reporte ao operador** com sumário breve.
+1. **Releia o `task.md` inteiro** — ele é o contrato; não há "prompt" separado. Objetivo,
+   Contexto, `Toca`, `ACs cobertos`, Critério de pronto.
+2. **Carimbe o início** no `## Tempo` (relógio do sistema — leia com `Get-Date`/`date`,
+   nunca chute). Essa marca é também a evidência de `in_progress` que o `/sync` deriva.
+3. **Implemente** conforme o contrato, escrevendo **somente** nos paths do `Toca`. Os ACs
+   listados em `ACs cobertos` são o que esta task realiza — não invente ACs fora do PRD.
+   Precisou tocar fora do `Toca`? Pare: ou é desvio legítimo (justifique ao operador — vira
+   candidato a pendência no `/close`) ou é erro (reverta). O hook confere no `Stop`.
+4. **Verifique o Critério de pronto.** Não atingiu → a task **falhou**: desfaça o tree
+   (checkpoint da plataforma), registre a causa e aplique a regra do grafo (ramo para /
+   batch segue).
+5. **Atualize `Status` e complete o `## Tempo`** (formatos canônicos abaixo).
+6. **Commit canônico** — o fecho da task:
+   ```
+   git add <cada path do Toca tocado> <docs/epics/<slug>/tasks/NNN-*.md>
+   git commit -m "factory(code): <slug> — task NNN <resumo>" -m "<aprendizado cross-task>"
+   ```
+   O corpo é onde o aprendizado viaja para quem vier depois (inclusive o `/close`):
+   decisões de borda, armadilhas, o que a próxima task deveria saber.
+7. **Lote de board** (ver abaixo): commit primeiro, sempre.
 
----
+### `Status` e `## Tempo` — os dois únicos campos do `/code` no `task.md`
 
-## Procedimento detalhado
-
-### Passo 1 — Leitura obrigatória de contextos
-
-Leia, na ordem:
-
-1. **Arquivo da task atual.** Foco em "O que fazer", "Nuâncias técnicas", "Arquivos afetados", "Critério de conclusão", e o "Prompt pronto pro Claude Code" que você acabou de receber.
-2. **PRD do épico** (`docs/epics/<slug>/prd.md`). Para contextualizar por que esta task existe.
-   - **Se PRD tiver seção `## ⚠️ Hipótese não-confirmada`:** ler com atenção redobrada — o fix pode ser na direção errada. Risco precisa ser preservado nas Notas de execução.
-3. **`docs/overviews/architecture-overview.md`.** Mapa técnico, invariantes que precisam ser respeitados, padrões do projeto.
-4. **`docs/epics/<slug>/tracking.md`** — especialmente:
-   - Seção "Notas de execução do épico" (notas datadas) — aprendizados acumulados de tasks anteriores que afetam a sua.
-   - Entradas das tasks anteriores na seção "Tasks": status, hash, notas.
-
-**Nada é pulável.** Pular leitura é fonte conhecida de divergência silenciosa entre tasks sequenciais.
-
-### Passo 2 — Reconciliação com notas datadas
-
-Antes de implementar, identifique:
-
-- Há nota datada no tracking que recomenda algo específico para tasks subsequentes (incluindo a sua)?
-- Sua spec da task se alinha com essa recomendação?
-
-Se há divergência:
-
-- **Conscientemente decida** qual seguir.
-- **Justifique a decisão no commit body** (seção "decisões de design" do body padronizado, abaixo).
-- Divergência silenciosa = bug futuro. Justificada = decisão informada que `/close` pode revisar.
-
-Se a divergência for grande demais para resolver com decisão sua (afeta arquitetura, contraria PRD, etc), **pause e comunique ao operador**. Possivelmente requer re-invocação de `/tasks` em nova sessão pelo operador.
-
-### Passo 3 — Implementação
-
-- **Estritamente o escopo da task.** Não estenda.
-- **Respeite invariantes arquiteturais** do architecture-overview.
-- **Padrões do projeto:** se o code-base usa um padrão estabelecido (ex: command handlers via mediator, Result type para retorno, value objects para identificadores), siga.
-- **Tasks de teste end-to-end ou integração cross-module:** leia exemplos de cenários adjacentes no código antes de assumir comportamento — não confie só no architecture-overview ou na descrição da task. Estados intermediários do sistema (ex: FSM com interrupções globais, fila com retries) podem divergir do que o overview sugere.
-
-Se identificar **oportunidade fora de escopo** durante implementação (refactor que melhoraria X, código duplicado que poderia ser DRY-ado), **NÃO implemente** — registre nas Notas de execução com formato:
-
-```
-[fora-de-escopo] <descrição curta>. Candidato a task futura.
-```
-
-### Passo 4 — Verificação programática
-
-- **Build:** rode o build do projeto. Deve passar.
-- **Testes existentes:** rode. Devem ficar verdes.
-- **Critério específico da task:** verifique cada item do "Critério de conclusão" da task individualmente.
-
-Se algo falhar:
-
-- **Falha é regressão sua:** corrija dentro do escopo da task.
-- **Falha é preexistente** (não causada por sua mudança): pause, reporte ao operador. Decisão de fixar ou não é dele.
-
-### Passo 5 — Atualizar tracking como log
-
-Em `docs/epics/<slug>/tracking.md`:
-
-- **Seção "Tasks", entrada da task atual:** atualize status (em execução → concluída), commit hash (após Passo 8), notas com sumário do que foi feito.
-- **Seção "Notas de execução do épico":** se a execução revelou algo que **afeta tasks futuras** (gotcha descoberto, padrão arquitetural divergente, dependência inesperada, recomendação para tasks subsequentes), adicione nota datada:
-
-```markdown
-- YYYY-MM-DD: Task NNN descobriu que <observação>.
-  Tasks NNN+1, NNN+2 devem [recomendação concreta].
-```
-
-Notas datadas são **input direto de `/code` das tasks futuras** — escreva pensando em quem vai ler.
-
-### Passo 6 — Preencher Notas de execução
-
-Em `docs/epics/<slug>/tasks/NNN-<slug>.md`, seção "Notas de execução":
-
-```markdown
-## Notas de execução
-
-- **Arquivos tocados:** [lista]
-- **Decisões de design:** [pontos de trade-off resolvidos durante implementação, divergências de notas datadas com justificativa]
-- **Edge cases descobertos:** [se houver]
-- **Achados [fora-de-escopo]:** [oportunidades identificadas mas não implementadas]
-- **Resultado de testes:** [contagem de testes que rodaram, novos cobertos pela task, total verde]
-- **Hash do commit:** [a preencher após Passo 8]
-```
-
-### Passo 7 — Marcar checkbox de Status
-
-Em `docs/epics/<slug>/tasks/NNN-<slug>.md`:
+Formato canônico das seções, como o `/tasks` as cria (README §12.5, verbatim):
 
 ```markdown
 ## Status
-- [ ] Pendente
-- [x] Concluída
+pendente | concluída
+<!-- concluída com resíduo: "concluída; ver pending.md#NNN" -->
 ```
 
-### Passo 8 — Commit nominal com body padronizado
-
-```bash
-git add <arquivos nominais>
-git status   # confirme só o esperado staged
-git commit -m "<scope>(NNN): <título curto>" -m "<body>"
+```markdown
+## Tempo
+<!-- preenchido por /code: iniciado / concluído / duração (relógio real, nunca estimativa) -->
 ```
 
-**Formato do body padronizado:**
+Preenchimento pelo `/code`:
 
-```
-Arquivos tocados:
-- caminho/arquivo1
-- caminho/arquivo2
+```markdown
+## Status
+concluída
 
-Decisões de design:
-- <decisão 1 + justificativa>
-- <decisão 2 + justificativa>
-
-Edge cases descobertos:
-- <edge case + tratamento> (ou "nenhum")
-
-Testes:
-- <novos testes adicionados, contagem>
-- <total de testes rodando verde>
+## Tempo
+- Iniciado: 2026-06-10 14:02
+- Concluído: 2026-06-10 14:47
+- Duração: 45min
 ```
 
-Mantenha o body **conciso e factual**. Não floreie.
+**Resíduo:** task que entregou o essencial mas deixou sobra (escopo que o PRD/design previa
+e ficou de fora, ou necessidade descoberta) fecha `concluída; ver pending.md#NNN` — para o
+batch não tentar re-executá-la. O `NNN` é o próximo número livre: confira o `pending.md`
+do épico se já existir (ausente = comece em 001). Quem **materializa** a entrada é o
+`/close` (single-writer de `pending.md`) — descreva o resíduo no corpo do commit e no
+resumo final, com o número reservado, para o `/close` consumir.
 
-### Passo 9 — Atualizar Notas de execução com hash
+### O lote de board
 
-Após o commit, abra o arquivo da task novamente e preencha o "Hash do commit" das Notas de execução com o hash curto do commit recém-criado.
+Após **cada** commit de task, emita o lote de verbos canônicos — apenas o vocabulário de
+`.claude/factory-process.md`, jamais nome de tool de provider:
 
-Faça **commit de amend** apenas se necessário pra incluir esse hash na mesma entrada. Caso contrário, pode ser commit secundário curto:
+- `complete_task(task_id, minutos, note=<resumo da implementação>)` — referencie a task
+  por `Task NNN — <título>` sob o Feature (`Board-ID` do pré-flight); o `note` é o mesmo
+  aprendizado que você gravou no corpo do commit da task (decisões, descobertas, desvios
+  justificados) — a documentação da implementação visível no card, não só no git. Resolver
+  o ID concreto e a degradação do campo de tempo (manifesto, aceita no `/setup`) é
+  trabalho do board-writer, nunca seu.
+- **1ª task do épico concluída** → o lote inclui `move_feature(feature_id, in_progress)`.
+  (O verbo só pode viajar agora: board exige tree limpa — é o primeiro momento com verdade
+  commitada para projetar.)
+- **Todas as tasks `concluída`** → o lote inclui `move_feature(feature_id, review)`.
+- Na dúvida, o estado emitido **deriva da evidência no filesystem** (tabela de derivação do
+  `factory-process.md`), nunca de contagem mental.
 
-```bash
-git add docs/epics/<slug>/tasks/NNN-<slug>.md
-git commit -m "docs(NNN): registrar hash do commit nas notas"
-```
+Protocolo de execução do lote:
 
-(Alternativa: deixar `/close` cuidar do hash no fechamento — escolha de cada projeto. Se deixar `/close`, registre nas Notas que o hash será preenchido pelo fechamento.)
-
-### Passo 10 — Reporte ao operador
-
-Ver seção "Como você reporta" abaixo.
+1. Confirme tree limpa (o commit da task foi o último ato sobre o tree).
+2. **Spawne o agent `board-writer`** com o lote, na ordem.
+3. **Valide a saída** com `.claude/scripts/validate-agent-output` (variante do SO),
+   `-Required "executed,failed,blocked"`. Saída inválida → re-instrua o agent uma vez;
+   nunca prossiga fingindo sucesso.
+4. **Try-reporta-prossegue:** falha de verbo ou de MCP não trava a task seguinte — reporte
+   "não consegui atualizar o board, rode `/sync` depois" e siga. Jamais re-tente em loop;
+   jamais bloqueie o batch por causa do board. `blocked: tree suja` = você esqueceu de
+   commitar — commite e re-spawne.
 
 ---
 
-## Como você reporta
+## Falhas — referência rápida
 
-Ao terminar (sucesso ou interrupção), devolve ao operador:
+| Situação | Ação |
+|---|---|
+| Task falha, **tem** dependentes | desfaz o tree (checkpoint), registra causa, **para o ramo**; outros ramos seguem |
+| Task falha, **sem** dependentes | desfaz o tree, registra causa, batch segue; vira candidata a pendência no `/close` |
+| Diff diverge do `Toca` (hook acusa no Stop) | justificar e reverter, ou registrar como candidato a pendência — nunca commitar em silêncio |
+| Decisão que o design não cobre | parar, expor trade-offs, **devolver ao operador** |
+| Board/MCP falha | try-reporta-prossegue: "rode `/sync` depois" |
+| Workflow paralelo: ramo morreu / patch `rejected` | tasks daquele ramo seguem `pendente`; operador decide re-rodar (`/code NNN`) ou deixar para o `/close` |
 
-- **Status final:** task concluída (com hash do commit) ou interrompida (motivo: build falhou, contexto faltou, spec ambígua, etc).
-- **Resumo do que foi feito:** principais arquivos tocados + decisões de design (espelha o commit body em formato curto).
-- **Divergências da spec ou de notas datadas**, se houver — explicitadas com motivo.
-- **Achados / oportunidades fora de escopo** registradas nas Notas de execução mas NÃO implementadas — operador decide se viram tasks futuras.
-- **Próximo passo sugerido:** "operador pode invocar `/code` para a próxima task da sequência" ou "considere invocar `/tasks` em nova sessão pra refinar a decomposição se [motivo]".
+`Status` de task que falhou permanece `pendente` — o filesystem não mente sobre o que não
+aconteceu.
 
----
+## Fechamento do estágio
 
-## Postura
+Não há commit extra de fechamento: **os commits por task são os commits canônicos do
+estágio** — o da última task é o último ato de escrita. Feche com o resumo ao operador:
+tasks concluídas (com duração), falhas e causas, resíduos anotados (números reservados),
+estado do Feature no board (ou pendência de `/sync`), e o aprendizado que vale levar ao
+`/close`.
 
-- **Executor metódico, não explorador.** Você executa o que está escrito. Exploração / discussão / decisão de design já aconteceu antes (PRD + estágio Tasking).
-- **Cético sobre suposições.** Se a task não diz explicitamente, não assuma. Sinaliza ao operador.
-- **Fiel ao escopo.** Tentação de "já que estou aqui, posso melhorar X também" é o caminho do drift de spec. Registra como nota, não implementa.
-- **Conservador em interpretação.** Quando a spec permite duas leituras, escolhe a mais restritiva e marca a outra como "considerei e descartei por X" no commit body.
-- **Build/teste verde é gate.** Não há "concluído mas com testes falhando". Se não verde, não marca como concluída — sinaliza pausa.
+**GATE:** o operador valida o resultado antes de qualquer próximo passo — `/close` quando
+o épico está pronto para os gates de qualidade, ou `/code NNN` para re-trabalhar. Você
+sugere; ele decide e digita.
 
----
+## Referências
 
-## Edge cases
-
-- **Spec ambígua ou incompleta:** pause, comunica ao operador o que está ambíguo, sinaliza que precisa refinamento (provavelmente via re-invocação de `/tasks` em nova sessão pelo operador). Não chuta.
-- **Pré-requisito faltando** (PRD, overviews, tracking ou arquivo da task ausentes): pause, comunica, sugere caminho de remediação. Não inicia execução.
-- **Notas datadas do tracking divergem da spec da task:** identifique a divergência, **escolha conscientemente** qual seguir, e **justifique no commit body**. Se a divergência for grande demais para resolver via decisão sua, pausa e comunica.
-- **Build/teste falha após implementação** dentro do escopo da task: investigue se é regressão sua ou problema preexistente. Se for sua, corrija. Se for preexistente fora do escopo, **pause e reporte**.
-- **Identifica oportunidade de refactor fora de escopo:** registre nas Notas de execução com formato `[fora-de-escopo] X poderia ser melhorado por Y — candidato a task futura`. Não implementa.
-- **Task tem múltiplos componentes que claramente exigem múltiplos commits:** sinal de que a task foi mal decomposta. Implementa o primeiro componente, para, comunica ao operador que provável refinamento de `/tasks` é necessário (caminho de "Refinamento mid-execução" documentado em `.claude/skills/tasks/SKILL.md`).
-- **Working tree sujo no início:** gate universal — não inicie execução. Pausa, reporta.
-
----
-
-## Boundary com `/close`
-
-Você (`/code`) é single-writer durante a **execução**. `/close` é single-writer no **fechamento do épico**.
-
-Após você concluir a task:
-- **`/code` fez:** commit + tracking-log + Notas de execução + checkbox Status.
-- **`/close` fará (depois, no fim do épico):** code review de coerência sobre o que você fez + closure-notes do épico inteiro.
-
-Não tente antecipar trabalho de `/close`. Você não escreve closure-notes. Você não decide se a entrega tem incoerências — isso é trabalho de `/close` revisar.
-
----
-
-## Anti-patterns
-
-- **Pular leitura de contextos.** Fonte número 1 de divergência silenciosa entre tasks. Não pule.
-- **Inventar conteúdo não pedido.** Se a spec não cobre, sinaliza. Não chuta.
-- **Estender escopo silenciosamente.** "Já que estou aqui, posso melhorar X também" — não. Registra como nota, não implementa.
-- **Ignorar notas datadas do tracking.** Se há nota recomendando algo, leia, decida conscientemente, justifique se divergir.
-- **Modificar arquivos fora do escopo de escrita.** PRD, overviews, outras tasks, closure-notes, `.claude/` — read-only para você.
-- **Marcar Status como Concluída com testes falhando.** Build/teste verde é gate. Se vermelho, não está concluída.
-- **Commit com mensagem só de título** ou body vazio — body padronizado é como `/close` reconstrói o que aconteceu. Sem body, fidelidade do closure-notes cai.
-- **Editar tracking livremente sem datar notas importantes.** Tracking é log — observações relevantes sempre datadas.
-- **Tentar consertar problema preexistente fora do escopo da task.** Pause e reporte.
-- **Invocar outro estágio.** Você é executor — não chama `/tasks`, `/brainstorm`, `/close` ou ninguém. Comunica ao operador e pausa.
+- README §3 (nota: `/code` é um comando com três modos), §5 (mapa de commits: um por
+  task), **§10 inteiro** (grafo, batch, paralelismo, compaction), §11 (estados
+  `in_progress`/`review`, board-writer, resiliência), §12.5 (`task.md`: Status/Tempo),
+  §15 (enforcement), §16 (anti-patterns).
+- `.claude/factory-process.md` — verbos, estados e derivação (a única língua do board).
+- `.claude/rules/factory/` — `invariants.md`, `git.md` (add nominal, proibições, push),
+  `epics.md` (Status/Tempo/Toca/ACs), `board.md` (sequência fixa, try-reporta-prossegue),
+  `filesystem.md` (verificação cirúrgica).
+- `.claude/hooks/README.md` — `guard-writes`, `check-toca`, `inject-invariants`.
+- `.claude/workflows/code-parallel.js` — o workflow salvo do modo paralelo.

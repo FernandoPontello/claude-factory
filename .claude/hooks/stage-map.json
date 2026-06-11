@@ -1,0 +1,102 @@
+{
+  "$comment": "Fonte única estágio → papel, write-set, pré-requisitos. Consumido por gate-stage, guard-writes, guard-skill e stop-scan. Globs relativos à raiz do projeto; * não cruza /, ** cruza.",
+  "stages": {
+    "vision": {
+      "role": "po",
+      "writes": ["docs/proposals/*/product-draft.md"],
+      "requires": [],
+      "consumesDocs": false
+    },
+    "blueprint": {
+      "role": "dev",
+      "writes": ["docs/proposals/*/architecture-draft.md"],
+      "requires": [],
+      "consumesDocs": false
+    },
+    "ground": {
+      "role": "any",
+      "writes": ["docs/overviews/product-overview.md", "docs/overviews/architecture-overview.md"],
+      "requires": [],
+      "consumesDocs": true
+    },
+    "propose": {
+      "role": "po",
+      "writes": ["docs/proposals/*/prd-*.md"],
+      "requires": ["docs/overviews/product-overview.md"],
+      "consumesDocs": true
+    },
+    "promote": {
+      "role": "po",
+      "writes": ["docs/epics/*/prd.md", "docs/proposals/*/prd-*.md"],
+      "requires": [],
+      "consumesDocs": true,
+      "push": true,
+      "$comment": "proposals só pelo glob dos PRDs (o lado deletado do git mv) — drafts são de /vision e /blueprint (§14)"
+    },
+    "bug": {
+      "role": "po",
+      "writes": ["docs/epics/*/prd.md"],
+      "requires": [],
+      "consumesDocs": true,
+      "push": true
+    },
+    "design": {
+      "role": "dev",
+      "writes": ["docs/epics/*/design.md"],
+      "requires": ["docs/overviews/architecture-overview.md"],
+      "consumesDocs": true
+    },
+    "tasks": {
+      "role": "dev",
+      "writes": ["docs/epics/*/tasks/*.md"],
+      "requires": [],
+      "consumesDocs": true
+    },
+    "code": {
+      "role": "dev",
+      "writes": ["**"],
+      "requires": [],
+      "consumesDocs": true,
+      "$comment": "write-set real do /code é o Toca de cada task — verificado por check-toca no Stop, não por glob estático"
+    },
+    "close": {
+      "role": "dev",
+      "writes": [
+        "docs/epics/*/closure-notes.md",
+        "docs/epics/*/pending.md",
+        "docs/overviews/product-overview.md",
+        "docs/overviews/architecture-overview.md",
+        "docs/wiki/**",
+        ".claude/build-run.md"
+      ],
+      "$comment": "build-run.md: em projeto que nasceu sem código, o PRIMEIRO /close gera a receita (Apêndice A passo 1)",
+      "requires": [],
+      "consumesDocs": true
+    },
+    "setup": {
+      "role": "any",
+      "writes": [
+        ".claude/kanban-config.json",
+        ".claude/settings.json",
+        ".claude/agents/**",
+        ".claude/skills/**",
+        ".claude/rules/factory/**",
+        ".claude/hooks/**",
+        ".claude/build-run.md"
+      ],
+      "$comment": "agents/skills inteiros: o /setup instala agents no projeto e regrava a variante de SO dos comandos de hook nos frontmatters (§15)",
+      "requires": [],
+      "consumesDocs": false
+    },
+    "sync": {
+      "role": "any",
+      "writes": [],
+      "requires": [],
+      "consumesDocs": true
+    }
+  },
+  "roles": {
+    "po": ["vision", "propose", "promote", "bug", "ground", "sync", "setup"],
+    "dev": ["blueprint", "design", "tasks", "code", "close", "ground", "sync", "setup"]
+  }
+}

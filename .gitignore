@@ -1,0 +1,5 @@
+# Rastro de runtime da factory (logs de falha do board etc.)
+.claude/.factory/
+
+# Memória institucional dos agents é VERSIONADA de propósito (README §15):
+# .claude/agent-memory/ NÃO entra aqui.

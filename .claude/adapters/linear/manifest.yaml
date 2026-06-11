@@ -1,0 +1,185 @@
+# Adapter Linear — manifesto de dados do contrato canônico (.claude/factory-process.md)
+# Destino no repo: .claude/adapters/linear/manifest.yaml
+# Validado contra tools/list real em 2026-06-10 (run do operador).
+# Padrão da API: tools de escrita unificadas em save_* — `id` presente = update, ausente = create.
+# Convenção de args MISTA: `team`/`assignee` humanizados, mas referências a entidades mantêm sufixo (`parentId`, `issueId`).
+# O /setup valida nomes de tools E schemas de argumentos via tools/list; falha-rápido em qualquer drift.
+
+provider: linear
+
+mcp:
+  transport: http
+  url: https://mcp.linear.app/mcp
+  # Auth: OAuth 2.1 (fluxo via /mcp na primeira sessão) ou Authorization: Bearer <API key>
+  # para uso headless do board-writer — ver ADAPTER.md §1.
+
+binding: # resolvido pelo /setup e persistido no kanban-config.json
+  team_key: "${kanban-config.board.team_key}"
+  team_id: null
+  state_ids: {} # ready|design|in_progress|review|done|closed → id
+  label_ids: {} # bug → id (única label semântica — estágio é o workflow state nativo)
+
+entities:
+  epic: project # Epic canônico → Project do Linear
+  feature: issue # Feature → Issue (transita pelos estados)
+  task: sub_issue # Task → Issue com parentId
+
+states: # nomes EXATOS dos workflow states do team (provisionados 1x na UI — conduzido pelo /setup via prerequisites:)
+  ready: "Ready"
+  design: "Design"
+  in_progress: "In Progress"
+  review: "Review"
+  done: "Done"
+  closed: "Closed"
+
+prerequisites: # conduzidos pelo /setup — verifica por evidência; pergunta só o inverificável
+  - id: mcp_connection
+    verify: { mcp: tools_list_responds }
+    fix: |
+      Conecte o MCP oficial do Linear nesta máquina (exige conta e workspace — linear.app/signup;
+      convide o segundo operador em Settings → Administration → Members):
+        claude mcp add --transport http linear-server https://mcp.linear.app/mcp
+      Abra uma sessão, rode /mcp e complete o OAuth. Reinicie a sessão e re-rode /setup.
+  - id: team
+    input:
+      {
+        ask: "Qual a key do team dedicado à factory? (ex: FAB)",
+        bind: team_key,
+      }
+    verify: { tool: list_teams, match: "key == $team_key" }
+    fix: |
+      Crie o team na UI: Settings → Teams → Add team. Workflow states são por team —
+      um team dedicado isola o raio de impacto do que a factory faz.
+  - id: states
+    verify: { tool: list_issue_statuses, scope: team, expect_all: "*states" }
+    fix: |
+      Team → Settings → Issue statuses & automations — crie/renomeie até existirem
+      exatamente (nome é contrato, string exata):
+        Ready (categoria Todo) · Design, In Progress e Review (categoria In Progress) ·
+        Done e Closed (categoria Completed).
+      Backlog pode ser removido; Canceled/Duplicate são nativos e a factory não os usa.
+  - id: triage
+    ask: "O Triage está DESLIGADO no team? (o MCP não enxerga essa configuração)"
+    fix: "Team settings → Triage → desligar — issue nova não pode desviar do fluxo."
+  - id: auth_headless
+    verify: { env: LINEAR_API_KEY, present: true } # presença, NUNCA o valor
+    fix: |
+      O board-writer conecta headless via Bearer. Gere a key em Settings → Security &
+      Access e rode NO SEU TERMINAL (nunca cole a key no chat):
+        PowerShell:  [Environment]::SetEnvironmentVariable("LINEAR_API_KEY", "<key>", "User")
+        bash/zsh:    export LINEAR_API_KEY="<key>"   (persista no profile do shell)
+      Reinicie a sessão para o ambiente carregar e responda "feito".
+
+resolve: # /setup roda uma vez: valida e popula o binding
+  - { tool: list_teams, bind: team_id, match: "key == binding.team_key" }
+  - {
+      tool: list_issue_statuses,
+      bind: state_ids,
+      scope: team,
+      expect_all: "*states",
+    }
+  - tool: create_issue_label # labels: provision nativo (create-if-missing; a factory nunca deleta)
+    ensure_each: ["bug"] # única label semântica — estado nativo dispensa marcador (stage_label: none)
+    bind: label_ids
+    via_list: list_issue_labels
+    match:
+      case_insensitive # unicidade do Linear é case-insensitive e cruza workspace+team;
+      # variante existente (ex: "Bug" default do workspace) é ADOTADA pelo id
+      # e registrada no relatório — o contrato é o binding, não a string de exibição
+  - check: tool_arg_schemas # valida ARGUMENTOS, não só nomes — drift de argumento é tão real quanto drift de nome
+    expectations:
+      save_issue: [id?, team, title, parentId?, state?, labels?, description?]
+      save_project: [id?, name, setTeams|addTeams, description?]
+      save_comment: [issueId, body]
+
+ops:
+  create_epic:
+    tool: save_project # sem id = create
+    args:
+      {
+        name: "$title",
+        setTeams: ["{binding.team_id}"],
+        description: "$body\n\n---\nfactory-key: $key",
+      }
+    returns: project.id
+
+  create_feature:
+    tool: save_issue # sem id = create
+    args:
+      team: "{binding.team_id}"
+      project: "$epic_id"
+      title: "$title"
+      description: "$body\n\n---\nfactory-key: $key" # body = artefato de nascimento; identidade na descrição (capability: description-marker)
+      state: "{binding.state_ids.ready}"
+    returns: issue.id
+
+  find_by_key:
+    tool: list_issues
+    args: { team: "{binding.team_id}", query: "factory-key: $key" }
+    returns: first(issues).id | null
+
+  move_feature:
+    tool: save_issue # com id = update; estágio é o state nativo (stage_label: none)
+    args:
+      id: "$feature_id"
+      state: "{binding.state_ids.$stage}"
+    returns: ok
+
+  create_task:
+    tool: save_issue # sem id = create, com parentId
+    args:
+      {
+        team: "{binding.team_id}",
+        parentId: "$feature_id",
+        title: "$title",
+        description: "$body",
+      }
+    returns: issue.id
+
+  complete_task:
+    tool: save_issue
+    args: { id: "$task_id", state: "{binding.state_ids.done}" }
+    then:
+      - when: "$minutes != null"
+        tool: save_comment
+        args: { issueId: "$task_id", body: "⏱ factory: $minutes min" } # capability time: comment
+      - when: "$note != null"
+        tool: save_comment
+        args: { issueId: "$task_id", body: "$note" } # aprendizado da implementação
+
+  comment_feature: # trilha do ciclo: design.md, closure-notes.md
+    tool: save_comment
+    args: { issueId: "$feature_id", body: "$body" }
+
+  link_related: # capability related: mention (backlink automático do Linear)
+    tool: save_comment
+    args:
+      {
+        issueId: "$feature_id",
+        body: "Relacionada: $related_identifier — $related_url",
+      }
+
+  tag_feature:
+    tool: save_issue
+    args: { id: "$feature_id", labels: "add {binding.label_ids.$tag}" }
+
+  read_board:
+    tool: list_issues
+    args: { team: "{binding.team_id}", project: "$epic_id?", state: "$stage?" }
+
+  wiki_publish_page: { unsupported: true } # documentos do MCP são somente leitura → wiki.provider: repo-markdown
+  wiki_read_index: { unsupported: true }
+
+capabilities:
+  hierarchy: native # Epic→Project; Feature→Issue
+  tasks: native # sub-issue via parent no save_issue — arg confirmado pelo check de schema do resolve
+  states: validate-only # MCP não cria workflow states → provisionamento manual 1x (conduzido pelo /setup via prerequisites:)
+  labels: native # create_issue_label — o /setup provisiona o bug (create-if-missing)
+  identity:
+    description-marker # factory-key no rodapé da descrição; find_by_key = busca textual
+    # (label dinâmica por feature é possível, mas poluiria o team — sem trigger, sem mudança)
+  stage_label: none # 6 estados exatos e validados — o state nativo é o contrato; marcador só em provider que colapsa estados
+  time: comment
+  related: mention
+  tags: native
+  wiki: none # usar repo-markdown (default da factory)
