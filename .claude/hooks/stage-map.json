@@ -93,7 +93,9 @@
       "role": "any",
       "writes": [],
       "requires": [],
-      "consumesDocs": true
+      "consumesDocs": true,
+      "requiresTrunk": true,
+      "$comment": "projeta o board compartilhado inteiro: roda só no trunk — branch com docs próprios projetaria verdade que talvez nunca chegue ao trunk; ahead na MAIN é legítimo (estado done = closure commitado pré-push)"
     }
   },
   "roles": {

@@ -9,7 +9,7 @@ implícito.
 
 | Script | Evento | Invariante (README) | Registrado em |
 |---|---|---|---|
-| `gate-stage` | `UserPromptExpansion` | pré-condições de estágio: papel, tree limpa ou suja só no próprio write-set, artefato requerido, frescor de `docs/**` (§5) | `.claude/settings.json` (projeto) e frontmatter dos perfis `po`/`dev` com `-Role` |
+| `gate-stage` | `UserPromptExpansion` | pré-condições de estágio: papel, tree limpa ou suja só no próprio write-set, artefato requerido, frescor de `docs/**` contra o **trunk remoto** e trunk obrigatório para estágios `requiresTrunk` (§5) | `.claude/settings.json` (projeto) e frontmatter dos perfis `po`/`dev` com `-Role` |
 | `guard-git` | `PreToolUse(Bash)` | operações git proibidas; só `fetch` e `pull --ff-only` sincronizam; add nominal (§5, §15) | `.claude/settings.json` (projeto) e frontmatter do `coder` (com `-Worker`: nega também push/fetch/pull — "push fora de hora" no runtime de workflow) |
 | `guard-writes` | `PreToolUse(Edit\|Write)` | single-writer durante o estágio (§14) | frontmatter de cada skill (`-Stage`) e do perfil `po` (`-Role po`: união dos write-sets do papel; o `-Stage` da skill ativa aperta) |
 | `guard-skill` | `PreToolUse(Skill)` | papel não invoca estágio fora da sua lista (§2) | frontmatter dos perfis `po`/`dev` |

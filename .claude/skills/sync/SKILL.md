@@ -29,6 +29,7 @@ hooks:
 8. **Try-reporta-prossegue.** Falha de board não trava o `/sync`: realinhe o que der, reporte nominalmente o que falhou. O reparo de um `/sync` que falhou é re-rodar o `/sync`.
 9. **Valide a saída do board-writer** com `.claude/scripts/validate-agent-output` (chaves obrigatórias: `executed`, `failed`, `blocked`). Saída inválida → re-instrua o agent uma vez; persistindo, trate como falha de board.
 10. **Nomeie a sessão** `factory/sync` — este estágio não tem épico único; o alvo é a projeção inteira.
+11. **Só no trunk.** O gate barra este estágio fora do trunk remoto (`requiresTrunk` no `stage-map.json`): o `/sync` projeta o board compartilhado inteiro, e uma branch fora do trunk pode carregar `docs/**` que nunca chegarão lá — projetá-los dessincronizaria todos os operadores. Ahead **na main** é legítimo (estado `done` = closure commitado pré-push, por desenho); branch própria não é. Voltar ao trunk e puxar (`git pull --ff-only`) são atos do operador.
 
 ---
 
@@ -112,7 +113,11 @@ Case board × derivado pela **`factory-key`** (o slug da pasta; re-entradas e ir
 **Guarda de frescor do conteúdo:** se o fetch do passo 1 **falhou**, a reconciliação de
 **conteúdo é pulada inteira** (vai ao relatório como indeterminada) — projetar descrição a
 partir de um checkout possivelmente velho é sobrescrever verdade nova com verdade morta.
-Estados seguem a regra do passo 1 (só o que não depende do origin).
+Estados seguem a regra do passo 1 (só o que não depende do origin). A primeira linha de
+defesa veio antes de você: o `gate-stage` bloqueia o `/sync` quando `docs/**` está atrás
+do **trunk remoto** (`origin/HEAD` — não o upstream da branch: branch antiga "em dia
+consigo mesma" também é verdade vencida) e instrui a reconciliação; este estágio nunca
+atualiza o codebase — `git pull --ff-only` é ato do operador.
 
 Consuma **`.claude/.factory/board-failures.jsonl`** como pista do que dessincronizou: cada entrada registra verbo falho e causa (gravadas pelo hook `PostToolUseFailure` do board-writer), apontando direto para os cards suspeitos. **Não limpe o arquivo nem remova entradas resolvidas** — o `/sync` não escreve filesystem; liste no relatório quais entradas este realinhamento resolveu e deixe o arquivo intacto.
 

@@ -74,9 +74,32 @@ if [ "$consumes" = "true" ] && [ -n "$(git remote 2>/dev/null)" ]; then
   dur=$(( $(date +%s) - start ))
   if [ "$fetch_rc" -eq 0 ]; then
     rm -f "$errf" "$(project_root)/.claude/.factory/fetch-last-cause"
-    behind=$(git rev-list --count 'HEAD..@{upstream}' -- docs/ 2>/dev/null)
-    if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
-      deny "gate-stage: docs/** está $behind commit(s) atrás do origin — consumir verdade vencida é o mesmo bug que tree suja, só que silencioso (§5). Reconcilie com: git pull --ff-only"
+    # comparação contra o TRUNK remoto, nunca o upstream da branch: docs/** é trunk-based (§5) —
+    # branch antiga "em dia consigo mesma" também é verdade vencida
+    trunk=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+    if [ -z "$trunk" ]; then
+      for cand in origin/main origin/master; do
+        if git rev-parse --verify --quiet "$cand" >/dev/null 2>&1; then trunk="$cand"; break; fi
+      done
+    fi
+    if [ -n "$trunk" ]; then
+      # estágios que projetam o board inteiro só rodam NO trunk (stage-map: requiresTrunk):
+      # branch com docs próprios projetaria verdade que talvez nunca chegue ao trunk;
+      # ahead na main é legítimo (done = closure commitado pré-push)
+      if [ "$(stage_field "$stage" '.requiresTrunk')" = "true" ]; then
+        cur_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+        upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+        trunk_local="${trunk#*/}"
+        if [ "$cur_branch" = "HEAD" ] || { [ "$cur_branch" != "$trunk_local" ] && [ "$upstream" != "$trunk" ]; }; then
+          deny "gate-stage: /$stage projeta o board compartilhado inteiro e só roda no TRUNK ($trunk_local, rastreando $trunk) — você está em '$cur_branch'. Branch fora do trunk pode carregar docs/** que nunca chegarão ao trunk: projetá-los dessincronizaria todos os operadores. Vá ao trunk atualizado (atos do operador — o modelo não troca de branch) e re-rode."
+        fi
+      fi
+      behind=$(git rev-list --count "HEAD..$trunk" -- docs/ 2>/dev/null)
+      if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
+        deny "gate-stage: docs/** está $behind commit(s) atrás do trunk remoto ($trunk) — consumir verdade vencida é o mesmo bug que tree suja, só que silencioso (§5). Reconcilie (atos do operador — o modelo não troca de branch): no trunk, git pull --ff-only; se você está numa branch antiga, volte ao trunk atualizado antes."
+      fi
+    else
+      echo "aviso gate-stage: não consegui resolver o trunk remoto (origin/HEAD, origin/main, origin/master) — frescor de docs/** não confirmado; prosseguindo (§5)."
     fi
   else
     cause="exit $fetch_rc"
