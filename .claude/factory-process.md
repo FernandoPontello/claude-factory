@@ -52,6 +52,7 @@ move_feature(feature_id, stage)
 create_task(feature_id, title, body?) → task_id
 complete_task(task_id, minutes?, note?)       # note = aprendizado da implementação
 comment_feature(feature_id, body)             # trilha do ciclo no card
+update_body(item_id, body, key?)              # re-projeta a descrição (key: providers com identidade na descrição)
 link_related(feature_id, feature_id)
 tag_feature(feature_id, tag)                  # tags semânticas (ex: bug)
 read_board(filtro) → estado
@@ -66,9 +67,28 @@ wiki_read_index(root) → índice
 `task.md` integral na Task (`/tasks`), a entrada do `pending.md` **verbatim** na Feature
 irmã (`/close`). **Comentários = a trilha do ciclo**, via `comment_feature`: o `design.md`
 ao concluir o `/design`, o `closure-notes.md` no `/close`; e `complete_task(note)` registra
-por task o aprendizado da implementação — o mesmo material do corpo do commit. A descrição
-é snapshot da criação: o filesystem segue sendo a verdade, e divergência posterior não é
-defeito — quem precisa do estado atual lê o repo.
+por task o aprendizado da implementação — o mesmo material do corpo do commit.
+
+**A descrição é espelho, não snapshot.** O estágio que altera um `.md` espelhado
+**re-projeta o body no seu próprio lote**, depois do commit, via `update_body`: o
+`/promote` re-projeta o `prd.md` após gravar o vínculo (Board-ID/Board-URL/Promovido em);
+o `/code` re-projeta o `task.md` de cada task junto do `complete_task` (Status e `## Tempo`
+atualizados); o `/close` re-projeta a entrada na Feature irmã após gravar o `Board-ID` no
+`pending.md`. O filesystem segue sendo a verdade — o espelho é cortesia de leitura no
+board; um refresh perdido se repara re-rodando o estágio escritor, ou pelo `/sync`, que
+**reconcilia a projeção inteira** (descrições divergentes e trilha de comentários
+faltante — ver a derivação).
+
+**Marcadores de trilha — comentário é ensure, nunca duplicata.** Todo comentário de
+trilha começa com um marcador canônico na primeira linha: `[factory:design]` (o
+`design.md`), `[factory:closure]` (o `closure-notes.md`), `[factory:note]` (a nota de
+implementação da task) — e o comentário de tempo começa com `⏱ factory:`. A semântica do
+`comment_feature` é **ensure-por-marcador**: antes de criar, o board-writer lê os
+comentários do card e, se o marcador já existe, **não recria nem edita** — comentário é
+trilha append-only; divergência de conteúdo num comentário existente é relatório, não
+reescrita. É o que torna re-runs de `/design`, `/close` e `/sync` idempotentes também na
+trilha. Da mesma forma, `update_body` com conteúdo idêntico ao atual é **no-op** — o
+board-writer compara antes de escrever.
 
 **Obrigatórios** (o provider precisa realizar): criar itens, transitar estados, alguma forma
 de agrupamento. **Opcionais com fallback declarado** no manifesto: tasks filhas, tempo,
@@ -110,6 +130,20 @@ Bordas: pasta de re-entrada (`-pNNN`) tem `design.md` sem `prd.md` e `Related-Bo
 header — liga-se como Feature irmã. `done` vs `closed` é pergunta sobre o **origin**: o
 `/sync` fetcha antes de derivar. O `/sync` **jamais escreve filesystem** — reparo de
 filesystem é re-rodar o estágio idempotente que o escreve.
+
+**O `/sync` reconcilia a projeção inteira — estados E conteúdo.** Além de realinhar
+estados, ele re-projeta a descrição de cada card casado a partir do artefato atual
+(`update_body`, no-op quando idêntico) e garante a trilha de comentários derivável de
+`docs/**` (`comment_feature` ensure-por-marcador: `[factory:design]` se `design.md`
+existe, `[factory:closure]` se `closure-notes.md` existe, `⏱ factory:` do `## Tempo` de
+task concluída). A nota de implementação (`[factory:note]`) nasce no `/code` e não é
+reconstruída pelo `/sync` — a fonte dela é o corpo do commit, não `docs/**`.
+
+**O `/sync` NUNCA deleta nem esvazia card** — nem o órfão. Card sem evidência no
+filesystem é **relatório e decisão humana**, por duas razões de operação real: um
+operador com checkout desatualizado rodando `/sync` não pode destruir cards válidos
+criados por outro; e uma limpeza deliberada do codebase (arquivar épicos antigos) não
+pode quebrar o kanban. O board perde card por ato humano, jamais por derivação.
 
 ## Wiki
 

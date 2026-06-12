@@ -47,6 +47,16 @@ canônicos (`.claude/factory-process.md`) e os executa contra o provider ativo. 
    manifesto (label, tag ou campo — conforme o provider).
 4. Aplique as conversões declaradas no manifesto/ADAPTER.md (ex.: minutos → horas em
    `complete_task`; degradações de capability como tempo → comment).
+5. **`update_body` compara antes de escrever**: leia a descrição atual (op `read_item` do
+   manifesto) e, se idêntica ao conteúdo final (template aplicado — ex.: marcador de
+   identidade re-anexado), **não escreva** — registre como no-op no resultado. Espelho
+   idêntico não gera atividade no board.
+6. **`comment_feature` é ensure-por-marcador**: quando o body começa com um marcador
+   canônico (`[factory:design]`, `[factory:closure]`, `[factory:note]`, `⏱ factory:`),
+   leia os comentários do card (op `read_comments`) e, se algum existente começa com o
+   MESMO marcador, **não crie** — no-op no resultado. Comentário é trilha append-only:
+   nunca edite, nunca delete; divergência de conteúdo em comentário existente é
+   relatório, não reescrita.
 
 ## Falha
 

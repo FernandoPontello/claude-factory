@@ -73,7 +73,7 @@ if [ "$consumes" = "true" ] && [ -n "$(git remote 2>/dev/null)" ]; then
   fetch_rc=$?
   dur=$(( $(date +%s) - start ))
   if [ "$fetch_rc" -eq 0 ]; then
-    rm -f "$errf"
+    rm -f "$errf" "$(project_root)/.claude/.factory/fetch-last-cause"
     behind=$(git rev-list --count 'HEAD..@{upstream}' -- docs/ 2>/dev/null)
     if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
       deny "gate-stage: docs/** está $behind commit(s) atrás do origin — consumir verdade vencida é o mesmo bug que tree suja, só que silencioso (§5). Reconcilie com: git pull --ff-only"
@@ -83,7 +83,19 @@ if [ "$consumes" = "true" ] && [ -n "$(git remote 2>/dev/null)" ]; then
     [ "$fetch_rc" -eq 124 ] && cause="timeout 8s"
     errtail=$(tail -3 "$errf" 2>/dev/null | tr '\n' ' ')
     rm -f "$errf"
-    echo "aviso gate-stage: git fetch falhou ($cause, ${dur}s)${errtail:+ — stderr: $errtail} — prosseguindo sem confirmação de frescor de docs/** (§5). O gate roda sem prompt de credencial (GIT_TERMINAL_PROMPT=0): se a causa é autenticação, rode 'git fetch' manualmente uma vez e a credencial ficará em cache."
+    # o diagnóstico sobrevive à paráfrase do modelo: toda falha vai para o log
+    diag="$(project_root)/.claude/.factory"
+    mkdir -p "$diag"
+    printf '%s | %s, %ss%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cause" "$dur" "${errtail:+ — stderr: $errtail}" >> "$diag/fetch-failures.log"
+    # causa repetida = uma linha curta; causa nova/mudada = aviso completo
+    last=""
+    [ -f "$diag/fetch-last-cause" ] && last=$(cat "$diag/fetch-last-cause" 2>/dev/null)
+    if [ "$last" = "$cause" ]; then
+      echo "aviso gate-stage: git fetch segue falhando ($cause) — detalhes em .claude/.factory/fetch-failures.log; prosseguindo (§5)."
+    else
+      printf '%s' "$cause" > "$diag/fetch-last-cause"
+      echo "aviso gate-stage: git fetch falhou ($cause, ${dur}s)${errtail:+ — stderr: $errtail} — prosseguindo sem confirmação de frescor de docs/** (§5). Diagnóstico completo em .claude/.factory/fetch-failures.log. O gate roda sem prompt de credencial (GIT_TERMINAL_PROMPT=0): se a causa é autenticação, rode 'git fetch' manualmente uma vez e a credencial ficará em cache."
+    fi
   fi
 fi
 

@@ -420,6 +420,12 @@ nada a fazer (confira por diff, não por presença). Confirme que os hooks de fr
 `paths: docs/epics/**` no frontmatter). São as convenções operacionais que o Claude Code
 carrega automaticamente; sem elas, as skills referenciam regras que não estão na sessão.
 
+**5e′ (antes do registro). Higiene do rastro de runtime.** Garanta `.claude/.factory/`
+no `.gitignore` do projeto (append não-destrutivo; arquivo ausente → criado): é onde os
+hooks gravam diagnóstico (`board-failures.jsonl`, `fetch-failures.log`) — rastro de
+runtime, nunca verdade. Os guards já o excluem do scan por construção, mas o gitignore
+mantém o `git status` limpo para o operador.
+
 **5e. Registro de hooks de projeto — `.claude/settings.json`.** É deste arquivo que a
 plataforma carrega os hooks de projeto — registro em qualquer outro lugar é guard inerte,
 exatamente o que o canário (passo 6) acusa. Grave a chave `"hooks"` com os três

@@ -49,6 +49,8 @@ function Test-MatchesGlobs([string]$Path, [string[]]$Globs) {
 function Get-DirtyPaths {
     # Paths sujos do working tree (porcelain). Renames contam os dois lados.
     # -uall: diretórios untracked viriam colapsados ("?? src/") e furariam o match de glob.
+    # .claude/.factory/** é rastro de runtime (logs de diagnóstico), nunca verdade — fora do scan
+    # mesmo onde o projeto não o gitignorou (o /setup garante o gitignore; isto é defesa em profundidade).
     $lines = @(git status --porcelain -uall 2>$null)
     if ($LASTEXITCODE -ne 0) { return @() }
     $paths = @()
@@ -61,7 +63,7 @@ function Get-DirtyPaths {
             $paths += $p
         }
     }
-    return $paths
+    return @($paths | Where-Object { ($_ -replace '\\', '/') -notmatch '^\.claude/\.factory/' })
 }
 
 function Deny([string]$Message) {

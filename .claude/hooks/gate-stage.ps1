@@ -74,6 +74,7 @@ if ($stage.consumesDocs) {
                 -ArgumentList '-c', 'credential.interactive=never', 'fetch', '--quiet' `
                 -NoNewWindow -PassThru -WorkingDirectory (Get-ProjectRoot) `
                 -RedirectStandardError $errFile
+            $null = $proc.Handle   # PS 5.1: sem tocar o Handle, ExitCode vem nulo após WaitForExit(ms)
             if ($proc.WaitForExit(8000)) {
                 $fetchOk = ($proc.ExitCode -eq 0)
                 if (-not $fetchOk) { $cause = "exit $($proc.ExitCode)" }
@@ -90,6 +91,8 @@ if ($stage.consumesDocs) {
         }
 
         if ($fetchOk) {
+            # causa anterior resolvida: a próxima falha volta a avisar verboso
+            Remove-Item (Join-Path (Get-ProjectRoot) '.claude/.factory/fetch-last-cause') -Force -ErrorAction SilentlyContinue
             $behind = git rev-list --count 'HEAD..@{upstream}' -- docs/ 2>$null
             if ($LASTEXITCODE -eq 0 -and $behind -and [int]$behind -gt 0) {
                 Deny ("gate-stage: docs/** está $behind commit(s) atrás do origin — consumir verdade vencida é o mesmo bug que tree suja, só que silencioso (§5).`n" +
@@ -99,8 +102,21 @@ if ($stage.consumesDocs) {
             # origin inacessível não paralisa trabalho local — try-reporta-prossegue aplicado ao git (§5)
             $detail = "$cause, $([int]$sw.Elapsed.TotalMilliseconds)ms"
             if ($stderrTail) { $detail += " — stderr: $stderrTail" }
-            Write-Output ("aviso gate-stage: git fetch falhou ($detail) — prosseguindo sem confirmação de frescor de docs/** (§5). " +
-                          "O gate roda sem prompt de credencial (GIT_TERMINAL_PROMPT=0): se a causa é autenticação, rode 'git fetch' manualmente uma vez e a credencial ficará em cache.")
+            # o diagnóstico sobrevive à paráfrase do modelo: toda falha vai para o log
+            $diagDir = Join-Path (Get-ProjectRoot) '.claude/.factory'
+            New-Item -ItemType Directory -Force -Path $diagDir | Out-Null
+            Add-Content -Path (Join-Path $diagDir 'fetch-failures.log') `
+                -Value "$((Get-Date).ToUniversalTime().ToString('o')) | $detail" -Encoding utf8
+            # causa repetida = uma linha curta; causa nova/mudada = aviso completo
+            $causeFile = Join-Path $diagDir 'fetch-last-cause'
+            $lastCause = if (Test-Path $causeFile) { (Get-Content $causeFile -Raw -ErrorAction SilentlyContinue).Trim() } else { '' }
+            if ($lastCause -eq $cause) {
+                Write-Output "aviso gate-stage: git fetch segue falhando ($cause) — detalhes em .claude/.factory/fetch-failures.log; prosseguindo (§5)."
+            } else {
+                Set-Content -Path $causeFile -Value $cause -Encoding utf8
+                Write-Output ("aviso gate-stage: git fetch falhou ($detail) — prosseguindo sem confirmação de frescor de docs/** (§5). " +
+                              "Diagnóstico completo em .claude/.factory/fetch-failures.log. O gate roda sem prompt de credencial (GIT_TERMINAL_PROMPT=0): se a causa é autenticação, rode 'git fetch' manualmente uma vez e a credencial ficará em cache.")
+            }
         }
     }
 }

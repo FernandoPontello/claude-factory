@@ -82,7 +82,8 @@
         ".claude/skills/**",
         ".claude/rules/factory/**",
         ".claude/hooks/**",
-        ".claude/build-run.md"
+        ".claude/build-run.md",
+        ".gitignore"
       ],
       "$comment": "agents/skills inteiros: o /setup instala agents no projeto e regrava a variante de SO dos comandos de hook nos frontmatters (§15)",
       "requires": [],

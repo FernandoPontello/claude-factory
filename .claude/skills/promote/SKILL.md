@@ -128,6 +128,20 @@ git push
 
 (Lote com vários PRDs: um único commit do vínculo, com o slug da promoção como alvo.) Push de novo? Sim — o vínculo também viaja: o Dev e o `/sync` derivam estado a partir do `Board-ID` no header, e essa pergunta é sobre o origin.
 
+### 7. Re-projetar a descrição — o espelho fecha o ciclo
+
+O `prd.md` mudou depois que o card nasceu (o header ganhou `Board-ID`/`Board-URL`/
+`Promovido em`) — e **a descrição é espelho, não snapshot** (`factory-process.md`). Com a
+tree limpa do passo 6, spawne o `board-writer` com o lote final:
+
+```
+# por PRD vinculado:
+update_body(feature_id, <conteúdo integral do prd.md atualizado>, key=<slug>)
+```
+
+Falha aqui → try-reporta-prossegue (o espelho é cortesia de leitura; re-rodar `/promote`
+re-projeta — idempotente).
+
 ## Re-execução e desastre: seguro por desenho
 
 Re-rodar `/promote` após qualquer falha é **seguro e é o reparo oficial**:

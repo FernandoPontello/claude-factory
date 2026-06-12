@@ -50,6 +50,8 @@ matches_globs() {
 
 # paths sujos do working tree; renames contam os dois lados
 # -uall: diretórios untracked viriam colapsados ("?? src/") e furariam o match de glob
+# .claude/.factory/** é rastro de runtime, nunca verdade — fora do scan (defesa em profundidade;
+# o /setup garante o gitignore no projeto)
 dirty_paths() {
   git status --porcelain -uall 2>/dev/null | while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -59,7 +61,7 @@ dirty_paths() {
       *" -> "*) printf '%s\n' "${p%% -> *}"; printf '%s\n' "${p##* -> }" ;;
       *) printf '%s\n' "$p" ;;
     esac
-  done
+  done | grep -Ev '^\.claude/\.factory/' || true
 }
 
 # stage_field <estágio> <campo-jq>  ex: stage_field design '.writes[]'

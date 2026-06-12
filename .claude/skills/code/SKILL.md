@@ -223,12 +223,17 @@ resumo final, com o número reservado, para o `/close` consumir.
 Após **cada** commit de task, emita o lote de verbos canônicos — apenas o vocabulário de
 `.claude/factory-process.md`, jamais nome de tool de provider:
 
-- `complete_task(task_id, minutos, note=<resumo da implementação>)` — referencie a task
-  por `Task NNN — <título>` sob o Feature (`Board-ID` do pré-flight); o `note` é o mesmo
-  aprendizado que você gravou no corpo do commit da task (decisões, descobertas, desvios
-  justificados) — a documentação da implementação visível no card, não só no git. Resolver
-  o ID concreto e a degradação do campo de tempo (manifesto, aceita no `/setup`) é
-  trabalho do board-writer, nunca seu.
+- `complete_task(task_id, minutos, note="[factory:note]\n\n" + <resumo da implementação>)` —
+  referencie a task por `Task NNN — <título>` sob o Feature (`Board-ID` do pré-flight); o
+  `note` é o mesmo aprendizado que você gravou no corpo do commit da task (decisões,
+  descobertas, desvios justificados) — a documentação da implementação visível no card,
+  não só no git — com o **marcador canônico na primeira linha** (ensure: re-run nunca
+  duplica). Resolver o ID concreto e a degradação do campo de tempo (manifesto, aceita no
+  `/setup`) é trabalho do board-writer, nunca seu.
+- `update_body(task_id, <conteúdo integral do task.md atualizado>)` — **a descrição é
+  espelho, não snapshot** (`factory-process.md`): o `task.md` acabou de mudar (`Status:
+  concluída`, `## Tempo` preenchido) e o card reflete o arquivo, não a versão de
+  nascimento.
 - **1ª task do épico concluída** → o lote inclui `move_feature(feature_id, in_progress)`.
   (O verbo só pode viajar agora: board exige tree limpa — é o primeiro momento com verdade
   commitada para projetar.)

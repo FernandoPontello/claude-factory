@@ -69,7 +69,7 @@ prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta
 
 resolve:                                  # /setup roda uma vez
   - { tool: core_list_projects, expect: "binding.project presente na lista" }
-  - { check: tools_list_contains, tools: [ wit_create_work_item, wit_update_work_item, wit_add_child_work_items, wit_work_items_link, wit_get_work_item, wit_get_work_items_batch_by_ids, wit_add_work_item_comment, search_workitem, wiki_list_wikis, wiki_create_or_update_page ] }
+  - { check: tools_list_contains, tools: [ wit_create_work_item, wit_update_work_item, wit_add_child_work_items, wit_work_items_link, wit_get_work_item, wit_get_work_items_batch_by_ids, wit_add_work_item_comment, wit_list_work_item_comments, search_workitem, wiki_list_wikis, wiki_create_or_update_page ] }
   # Estados não são listáveis via MCP: o contrato é o pré-requisito inherited_process
   # (prerequisites:); divergência de nome falha-rápido na primeira transição
   # (try-reporta-prossegue + /sync).
@@ -125,6 +125,19 @@ ops:
   comment_feature:                        # trilha do ciclo: design.md, closure-notes.md
     tool: wit_add_work_item_comment
     args: { project: "{binding.project}", workItemId: "$feature_id", comment: "$body" }
+
+  update_body:                            # re-projeção da descrição (espelho) — identidade é tag, descrição fica limpa
+    tool: wit_update_work_item
+    args: { id: "$item_id", fields: { "System.Description": "$body" } }
+    returns: ok
+
+  read_item:                              # leitura para o no-op do update_body (comparar descrição atual)
+    tool: wit_get_work_item
+    args: { id: "$item_id", project: "{binding.project}" }
+
+  read_comments:                          # leitura para o ensure-por-marcador do comment_feature
+    tool: wit_list_work_item_comments
+    args: { project: "{binding.project}", workItemId: "$item_id" }
 
   link_related:
     tool: wit_work_items_link

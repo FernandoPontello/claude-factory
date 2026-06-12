@@ -23,9 +23,9 @@ hooks:
 2. **Este estágio NUNCA escreve filesystem — nem para reparar.** O write-set de `sync` no `stage-map.json` é **vazio**: o `guard-writes -Stage sync` do frontmatter bloqueia toda escrita por construção, e o `stop-scan` confere que a tree saiu como entrou. Reparo de filesystem é re-rodar o estágio idempotente que o escreve (ex.: `/promote`) — nunca o `/sync`. Consequência direta: o `/sync` **não commita** — a única linha do mapa de commits do README §5 com "não".
 3. **`git fetch` PRIMEIRO.** `done` vs `closed` é pergunta sobre o **origin** — sem fetch a derivação mente. Fetch falho: avise **ruidosamente** e derive apenas o que não depende do origin; o que depende fica **indeterminado** no relatório, nunca chutado.
 4. **A derivação é parte do contrato, não improviso do modelo.** O estado de cada evidência sai da tabela de `.claude/factory-process.md`, reproduzida integralmente abaixo. Não invente heurística; na dúvida entre tabela e intuição, a tabela ganha.
-5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
-6. **`find_by_key` precede qualquer criação.** Re-execução recupera, não duplica — é o que torna o `/sync` idempotente e seguro de agendar.
-7. **Nunca delete card.** Órfão do board sem evidência no filesystem é **decisão humana**: vai ao relatório, não à lixeira. O contrato nem tem verbo de delete — por desenho.
+5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `update_body`, `comment_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
+6. **`find_by_key` precede qualquer criação.** Re-execução recupera, não duplica — é o que torna o `/sync` idempotente e seguro de agendar. A trilha também é idempotente: `comment_feature` é ensure-por-marcador e `update_body` idêntico é no-op (contrato) — re-rodar o `/sync` nunca duplica nada.
+7. **Nunca delete nem esvazie card.** Órfão do board sem evidência no filesystem é **decisão humana**: vai ao relatório, não à lixeira — por duas razões de operação real: um operador com **checkout desatualizado** rodando `/sync` não pode destruir cards válidos criados por outro; e uma **limpeza deliberada do codebase** (arquivar épicos antigos) não pode quebrar o kanban. O contrato nem tem verbo de delete — por desenho. Órfão também não recebe `update_body`: sem evidência, não há o que projetar.
 8. **Try-reporta-prossegue.** Falha de board não trava o `/sync`: realinhe o que der, reporte nominalmente o que falhou. O reparo de um `/sync` que falhou é re-rodar o `/sync`.
 9. **Valide a saída do board-writer** com `.claude/scripts/validate-agent-output` (chaves obrigatórias: `executed`, `failed`, `blocked`). Saída inválida → re-instrua o agent uma vez; persistindo, trate como falha de board.
 10. **Nomeie a sessão** `factory/sync` — este estágio não tem épico único; o alvo é a projeção inteira.
@@ -100,9 +100,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".claude/scripts/validate-ag
 Case board × derivado pela **`factory-key`** (o slug da pasta; re-entradas e irmãs pendentes: `<slug>-pNNN`). Quatro resultados possíveis por chave:
 
 1. **Casado e igual** — nada a fazer.
-2. **Casado e divergente** — o board mente; entra no lote de realinhamento.
+2. **Casado e divergente** — o board mente; entra no lote de realinhamento. Divergência é
+   **estado OU conteúdo**: estado fora do derivado; descrição diferente do artefato atual
+   (`prd.md` na Feature, `task.md` na Task, entrada do `pending.md` na irmã); trilha de
+   comentários derivável de `docs/**` faltando (`[factory:design]` quando `design.md`
+   existe; `[factory:closure]` quando `closure-notes.md` existe; `⏱ factory:` quando o
+   `## Tempo` de uma task concluída está preenchido).
 3. **Evidência sem card** — falta criar (com `find_by_key` antes, sempre).
 4. **Card sem evidência (órfão)** — decisão humana; só relatório (regra 7).
+
+**Guarda de frescor do conteúdo:** se o fetch do passo 1 **falhou**, a reconciliação de
+**conteúdo é pulada inteira** (vai ao relatório como indeterminada) — projetar descrição a
+partir de um checkout possivelmente velho é sobrescrever verdade nova com verdade morta.
+Estados seguem a regra do passo 1 (só o que não depende do origin).
 
 Consuma **`.claude/.factory/board-failures.jsonl`** como pista do que dessincronizou: cada entrada registra verbo falho e causa (gravadas pelo hook `PostToolUseFailure` do board-writer), apontando direto para os cards suspeitos. **Não limpe o arquivo nem remova entradas resolvidas** — o `/sync` não escreve filesystem; liste no relatório quais entradas este realinhamento resolveu e deixe o arquivo intacto.
 
@@ -111,9 +121,21 @@ Consuma **`.claude/.factory/board-failures.jsonl`** como pista do que dessincron
 Monte o lote de verbos — só vocabulário canônico:
 
 ```
-# divergente (caso 2): projetar o estado derivado
+# divergente em ESTADO (caso 2): projetar o estado derivado
 move_feature(feature_id, <estado derivado>)
 # (provider que colapsa estados: o board-writer atualiza o marcador factory-stage junto — manifesto, não você)
+
+# divergente em CONTEÚDO (caso 2): re-projetar o espelho — idempotente por contrato
+update_body(feature_id, <prd.md integral>, key=<factory-key>)        # Feature
+update_body(task_id, <task.md integral>)                            # cada Task do épico
+update_body(<irmã>, <entrada do pending.md verbatim>, key=<slug>-pNNN)
+# (update_body idêntico é no-op — emitir para todo card casado é seguro; o board-writer compara)
+
+# trilha faltante (caso 2): ensure-por-marcador — nunca duplica, nunca edita, nunca deleta
+comment_feature(feature_id, "[factory:design]\n\n" + <design.md integral>)        # se design.md existe
+comment_feature(feature_id, "[factory:closure]\n\n" + <closure-notes.md integral>) # se closure-notes.md existe
+comment_feature(task_id, "⏱ factory: <minutos do ## Tempo> min")                   # se task concluída com Tempo
+# ([factory:note] NÃO é reconstruída — a fonte é o corpo do commit, não docs/**; nasce no /code)
 
 # evidência sem card (caso 3): criar, com identidade antes de criação
 find_by_key(<factory-key>) → feature_id | nulo
@@ -121,6 +143,7 @@ se nulo:
   create_feature(epic_id, <título>, key=<factory-key>,
                  body=<o artefato de nascimento: prd.md, ou a entrada do pending.md verbatim>) → feature_id
   move_feature(feature_id, <estado derivado>)
+  # + a trilha derivável de docs/** (comment_feature acima) e as tasks (create_task com body)
   se Feature irmã (entrada de pending.md ou pasta -pNNN):
     link_related(feature_id, <Feature original>)
 ```
