@@ -155,7 +155,7 @@ Se a entrada do `pending.md` não tiver `Board-ID` (fechamento com board fora do
 3. **Só depois do commit**, o board: spawne o agent `board-writer` com o lote de verbos canônicos —
    - modo normal/bug: `move_feature(<Board-ID do prd.md>, design)`
    - re-entrada: `move_feature(<Board-ID da Feature irmã>, design)` — precedido de `find_by_key(<slug>-pNNN)` quando o ID não estava na entrada de origem
-   - em todos os modos: `comment_feature(<Board-ID>, <conteúdo integral do design.md>)` — o design publicado na trilha do card (a descrição permanece o PRD de nascimento; comentários são o ciclo — projeção de conteúdo, `factory-process.md`)
+   - em todos os modos: `comment_feature(<Board-ID>, "[factory:design]\n\n" + <conteúdo integral do design.md>)` — o design publicado na trilha do card, com o **marcador canônico na primeira linha** (`factory-process.md`: é o marcador que torna o comentário ensure — re-run e `/sync` nunca o duplicam). A descrição permanece o PRD de nascimento; comentários são o ciclo.
 
    O movimento acontece **ao concluir o estágio, nunca ao iniciar** — o board reflete fatos consumados (README §11).
 4. Valide a saída estruturada do agent com `.claude/scripts/validate-agent-output` (variante do SO; no Windows, `validate-agent-output.ps1`) exigindo as chaves `executed,failed,blocked`:

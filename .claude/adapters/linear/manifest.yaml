@@ -151,6 +151,22 @@ ops:
     tool: save_comment
     args: { issueId: "$feature_id", body: "$body" }
 
+  update_body: # re-projeção da descrição (espelho) — issues e tasks
+    tool: save_issue # com id = update
+    args:
+      id: "$item_id"
+      description: "$body\n\n---\nfactory-key: $key" # com key: o marcador É a identidade aqui — re-anexar SEMPRE
+      # sem key (tasks não têm identidade própria): description: "$body"
+    returns: ok
+
+  read_item: # leitura para o no-op do update_body (o board-writer compara a descrição atual)
+    tool: get_issue
+    args: { id: "$item_id" }
+
+  read_comments: # leitura para o ensure-por-marcador do comment_feature
+    tool: list_comments
+    args: { issueId: "$item_id" }
+
   link_related: # capability related: mention (backlink automático do Linear)
     tool: save_comment
     args:

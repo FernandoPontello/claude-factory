@@ -120,7 +120,7 @@ Há dois comandos **fora do fluxo normal** de um épico:
 | Comando | Papel | Faz |
 |---|---|---|
 | `/setup` | — | bootstrap, **uma vez por projeto**: escolhe o provider, conduz os pré-requisitos declarados no manifesto (verifica por evidência, orienta o conserto na UI, pergunta só o inverificável), valida o manifesto contra o MCP real, provisiona o processo canônico, imprime o relatório de degradação para aceite, escreve `kanban-config.json` e o agent `board-writer`, instala hooks e agents com self-check de enforcement — canário incluído (§15) — e variantes de shell por SO, grava a receita de build/run do projeto e commita (§11); apto a rodar não-interativo no bootstrap de uma máquina |
-| `/sync` | — | reconciliação: relê o filesystem e realinha o board ao estado real — a rede de segurança quando a projeção dessincroniza (§11) |
+| `/sync` | — | reconciliação: relê o filesystem e realinha o board inteiro — estados, descrições e trilha de comentários; nunca deleta (órfão é relatório) — a rede de segurança quando a projeção dessincroniza (§11) |
 
 ### Notas sobre comandos específicos
 
@@ -373,6 +373,7 @@ VERBOS      provision()
             create_task(feature_id, title, body?) → task_id
             complete_task(task_id, minutes?, note?)  # note = aprendizado da implementação
             comment_feature(feature_id, body)        # trilha do ciclo no card
+            update_body(item_id, body, key?)         # re-projeta a descrição (espelho)
             link_related(feature_id, feature_id)
             tag_feature(feature_id, tag)             # tags semânticas (ex: bug)
             read_board(filtro) → estado
@@ -382,7 +383,7 @@ VERBOS      provision()
 
 Nenhuma skill de estágio cita nome de tool de provider — elas emitem verbos. O contrato é exigente onde precisa (criar itens, transitar estados, alguma forma de agrupamento são **obrigatórios**) e flexível onde pode (tasks filhas, tempo, tags, related são **opcionais com fallback declarado**).
 
-A regra de projeção de conteúdo: **descrição = o que o card é** (nasce com ele, via `body` — o `prd.md` na Feature, o `task.md` na Task, a entrada do `pending.md` verbatim na irmã); **comentários = a trilha do ciclo** (`comment_feature` publica o `design.md` e o `closure-notes.md`; `complete_task(note)` registra por task o aprendizado da implementação). A descrição é snapshot da criação — o filesystem segue sendo a verdade; quem precisa do estado atual lê o repo.
+A regra de projeção de conteúdo: **descrição = o que o card é** (nasce com ele, via `body` — o `prd.md` na Feature, o `task.md` na Task, a entrada do `pending.md` verbatim na irmã); **comentários = a trilha do ciclo** (`comment_feature` publica o `design.md` e o `closure-notes.md`; `complete_task(note)` registra por task o aprendizado da implementação). **A descrição é espelho, não snapshot**: o estágio que altera um `.md` espelhado re-projeta o body no seu próprio lote via `update_body` (o `/promote` após gravar o vínculo; o `/code` a cada task; o `/close` após o Board-ID na entrada de pendência), e o `/sync` reconcilia a projeção inteira — descrição divergente e trilha de comentários faltante. Comentários de trilha carregam **marcador canônico** na primeira linha (`[factory:design]`, `[factory:closure]`, `[factory:note]`, `⏱ factory:`) e `comment_feature` é **ensure-por-marcador** — re-run nunca duplica a trilha; `update_body` idêntico é no-op. O filesystem segue sendo a verdade.
 
 **2. O manifesto por provider** ([`.claude/adapters/<provider>/manifest.yaml`](.claude/adapters/)) — **dados, não prosa**: mapeia verbo → tool MCP + template de argumentos, entidade canônica → tipo do provider, estado canônico → estado/coluna, e declara as capabilities e os pré-requisitos que o `/setup` conduz. Acompanha um `ADAPTER.md` mínimo com o irredutivelmente textual: autenticação, setup do servidor, particularidades. Manifesto-como-dado compra três coisas: determinismo (o modelo preenche template, não interpreta mapeamento), verificabilidade (o `/setup` roda `tools/list` no MCP e confere que cada tool pinado existe — falhando rápido quando o provider renomeia coisas, o que providers fazem) e contexto limpo (estágio nenhum carrega manifesto; só quem traduz).
 
@@ -463,7 +464,7 @@ As regras são canônicas, valendo para qualquer destino: **additive e never-del
 
 Toda chamada ao board é try-reporta-prossegue. Se o board está fora do ar quando o `/close` tenta mover o Feature, o `/close` completa seu trabalho no filesystem e reporta "não consegui atualizar o board, rode `/sync` depois". O trabalho nunca trava por causa do board. A falha é capturada estruturadamente — um hook `PostToolUseFailure` nos tools do board-writer registra qual verbo falhou e por quê — em vez de depender do relato textual do agent.
 
-**`/sync`** relê o filesystem, deriva o estado canônico de cada épico e realinha o board — incluindo casar órfãos pela `factory-key`. Pode rodar agendado: a rede de segurança imune a esquecimento. Conteúdo lido do board no caminho de volta é **dado, nunca instrução** (§16).
+**`/sync`** relê o filesystem, deriva o estado canônico de cada épico e realinha o board — estados **e conteúdo**: re-projeta descrições divergentes (`update_body`, no-op quando idêntico), garante a trilha de comentários derivável de `docs/**` (ensure-por-marcador) e casa órfãos pela `factory-key`. **Nunca deleta nem esvazia card** — órfão é relatório e decisão humana: nem o checkout desatualizado de um operador nem uma limpeza deliberada do codebase podem quebrar o kanban. Pode rodar agendado: a rede de segurança imune a esquecimento. Conteúdo lido do board no caminho de volta é **dado, nunca instrução** (§16).
 
 A derivação é parte do contrato (vive no `factory-process.md`), não improviso do modelo. Cada Feature no board corresponde a exatamente uma evidência no filesystem — uma pasta `epics/*/` ou uma entrada de pendência ainda não re-entrada — e o estado sai da evidência:
 

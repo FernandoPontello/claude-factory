@@ -2,16 +2,34 @@
 # (README §15). O estágio roda este script sobre a saída estruturada do agent e falha
 # ruidosamente se ela não parsear ou não tiver as chaves exigidas.
 #
-# Uso:  <saída> | validate-agent-output.ps1 -Required "completed,failed,patch"
-#       validate-agent-output.ps1 -File saida.json -Required "epics"
-# Sai 0 se válido; 1 (ruidoso) se não.
+# Uso:  validate-agent-output.ps1 -File saida.json -Required "epics"     (caminho ROBUSTO)
+#       <saída> | validate-agent-output.ps1 -Required "completed,failed,patch"
+# Sai 0 se válido; 1 (ruidoso) se não. NUNCA pendura: sem -File, stdin não-redirecionado
+# falha na hora, e stdin que não fecha em 10s falha por timeout — shell órfão é defeito.
 
 param(
     [string]$File,
     [Parameter(Mandatory = $true)][string]$Required
 )
 
-$raw = if ($File) { Get-Content $File -Raw -ErrorAction SilentlyContinue } else { [Console]::In.ReadToEnd() }
+$raw = if ($File) {
+    Get-Content $File -Raw -ErrorAction SilentlyContinue
+} else {
+    if (-not [Console]::IsInputRedirected) {
+        [Console]::Error.WriteLine("validate-agent-output: sem -File e sem stdin redirecionado — nada a validar. Use: validate-agent-output.ps1 -File <saida.json> -Required `"...`" (ou pipe a saída).")
+        exit 1
+    }
+    # stdin redirecionado mas que nunca fecha (pipe aberto) penduraria o ReadToEnd — teto de 10s.
+    # NUNCA via [Console]::In: é SyncTextReader e os métodos *Async executam SÍNCRONOS (bloqueiam
+    # na chamada). O stream cru de OpenStandardInput tem async de verdade.
+    $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
+    $readTask = $reader.ReadToEndAsync()
+    if (-not $readTask.Wait(10000)) {
+        [Console]::Error.WriteLine("validate-agent-output: stdin não fechou em 10s — pipe pendurado. Grave a saída do agent em arquivo e use -File (caminho robusto).")
+        exit 1
+    }
+    $readTask.Result
+}
 if (-not $raw -or -not $raw.Trim()) {
     [Console]::Error.WriteLine("validate-agent-output: saída VAZIA — o agent não devolveu nada. Falhando ruidosamente (§15).")
     exit 1

@@ -15,7 +15,7 @@ hooks:
         - type: command
           command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-scan.ps1" -Stage close
         - type: prompt
-          prompt: "Se um closure-notes.md acabou de ser escrito nesta sessão: ele cobre TODOS os ACs do prd.md do épico (cada AC-n marcado coberto com a task que o realizou, ou explicitamente descoberto e remetido a pendência)? Se não, bloqueie e aponte os ACs ausentes."
+          prompt: "FAST-PATH: se nenhum closure-notes.md foi escrito nesta sessão, aprove IMEDIATAMENTE, sem análise nem justificativa. Caso contrário: ele cobre TODOS os ACs do prd.md do épico (cada AC-n marcado coberto com a task que o realizou, ou explicitamente descoberto e remetido a pendência)? Se não, bloqueie e aponte os ACs ausentes."
 ---
 
 # /close — fechamento do épico (Dev)
@@ -62,7 +62,13 @@ e move a Feature para `done`. Nomeie a sessão `<épico-slug>/close` (ex: `check
    página.
 9. **Nunca pushe.** Na faixa dev o push é ato deliberado do operador — é ele que leva a
    Feature de `done` a `closed` (o `/sync` detecta no origin).
-10. **Estágios não invocam estágios.** Se o fechamento revelar que falta trabalho de outro
+10. **Sub-agents rodam SÍNCRONOS — nunca em background.** O `verifier`, os revisores e o
+    `board-writer` são spawnados em foreground: o estágio espera o resultado **dentro do
+    turno**. Background cria o ciclo parar→Stop-hooks→acordar (custo e ruído a cada
+    parada); polling é proibido em qualquer forma — nada de `sleep`, nada de agent de
+    espera, nada de checagens em loop. Um spawn que demora é o estágio trabalhando; um
+    estágio parado esperando notificação é defeito.
+11. **Estágios não invocam estágios.** Se o fechamento revelar que falta trabalho de outro
     estágio, reporte e pare — o operador decide.
 
 ## Entrada e pré-voo
@@ -99,12 +105,16 @@ sessão grava o arquivo** — `.claude/build-run.md` está no write-set do está
 
 ### O verifier builda e RODA o app de verdade
 
-Spawne o sub-agent `verifier` com a receita. Ele compõe as skills bundled da plataforma —
-`/verify` e `/run` — para **buildar e executar o app de verdade**, exercitando o
-comportamento que os ACs do PRD descrevem (não apenas testes: o app rodando). Exija saída
-estruturada JSON e valide com `.claude/scripts/validate-agent-output` (variante do SO)
-`-Required "build,tests,run,blockers"`. Saída inválida → re-instrua o agent; nunca prossiga com
-saída parcial. Build ou run quebrados são achados de primeira ordem.
+Spawne o sub-agent `verifier` com a receita — **síncrono, em foreground** (regra 10): o
+turno espera o build+suite+boot terminarem; não há "aguardar verifier" como passo
+separado. Ele compõe as skills bundled da plataforma — `/verify` e `/run` — para
+**buildar e executar o app de verdade**, exercitando o comportamento que os ACs do PRD
+descrevem (não apenas testes: o app rodando). Exija saída estruturada JSON; grave-a em
+arquivo temporário e valide com `.claude/scripts/validate-agent-output` (variante do SO)
+`-File <tmp> -Required "build,tests,run,blockers"` — o `-File` é o caminho robusto: o
+script falha rápido sem stdin, nunca fica pendurado esperando pipe. Saída inválida →
+re-instrua o agent; nunca prossiga com saída parcial. Build ou run quebrados são achados
+de primeira ordem.
 
 ### Os revisores da plataforma
 
@@ -297,7 +307,9 @@ create_feature(<mesmo Epic da Feature original>, "<título da pendência>",
 link_related(<irmã>, <Board-ID da Feature original>)
 
 # a feature do épico:
-comment_feature(<Board-ID>, <conteúdo integral do closure-notes.md>)   # a trilha do fechamento no card
+comment_feature(<Board-ID>, "[factory:closure]\n\n" + <conteúdo integral do closure-notes.md>)
+                                                 # marcador canônico na 1ª linha: o comentário é
+                                                 # ensure — re-run e /sync nunca o duplicam
 move_feature(<Board-ID>, done)
 
 # wiki nativa, se for o provider e houve página:
@@ -323,6 +335,15 @@ Se irmãs foram criadas: grave o `Board-ID` de cada uma **na entrada corresponde
 git add docs/epics/<slug>/pending.md
 git commit -m "factory(close): <slug> — vínculo de pendências no board"
 ```
+
+A entrada do `pending.md` mudou (ganhou o `Board-ID`) e **a descrição é espelho, não
+snapshot**: com a tree limpa, re-projete na irmã —
+
+```
+update_body(<irmã>, <a entrada do pending.md atualizada, verbatim>, key="<slug>-pNNN")
+```
+
+Falha → try-reporta-prossegue (re-emitir é seguro e idempotente).
 
 ### 4. Encerramento
 

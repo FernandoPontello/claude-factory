@@ -2,8 +2,10 @@
 # validate-agent-output — valida a saída estruturada de sub-agents (README §15).
 # Espelho de validate-agent-output.ps1. Requer jq.
 #
-# Uso:  <saída> | validate-agent-output.sh --required "completed,failed,patch"
-#       validate-agent-output.sh --file saida.json --required "epics"
+# Uso:  validate-agent-output.sh --file saida.json --required "epics"    (caminho ROBUSTO)
+#       <saída> | validate-agent-output.sh --required "completed,failed,patch"
+# NUNCA pendura: sem --file, stdin de terminal falha na hora; pipe que não fecha em 10s
+# falha por timeout — shell órfão é defeito.
 
 FILE=""; REQUIRED=""
 while [ $# -gt 0 ]; do
@@ -15,7 +17,19 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$REQUIRED" ] || { echo "validate-agent-output: --required é obrigatório" >&2; exit 1; }
 
-if [ -n "$FILE" ]; then raw=$(cat "$FILE" 2>/dev/null); else raw=$(cat); fi
+if [ -n "$FILE" ]; then
+  raw=$(cat "$FILE" 2>/dev/null)
+else
+  if [ -t 0 ]; then
+    echo "validate-agent-output: sem --file e sem stdin redirecionado — nada a validar. Use: validate-agent-output.sh --file <saida.json> --required \"...\" (ou pipe a saída)." >&2
+    exit 1
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    raw=$(timeout 10 cat) || { echo "validate-agent-output: stdin não fechou em 10s — pipe pendurado. Grave a saída em arquivo e use --file (caminho robusto)." >&2; exit 1; }
+  else
+    raw=$(cat)
+  fi
+fi
 if [ -z "$(printf '%s' "$raw" | tr -d '[:space:]')" ]; then
   echo "validate-agent-output: saída VAZIA — o agent não devolveu nada. Falhando ruidosamente (§15)." >&2
   exit 1
