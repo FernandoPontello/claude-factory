@@ -23,7 +23,7 @@ hooks:
 2. **Este estágio NUNCA escreve filesystem — nem para reparar.** O write-set de `sync` no `stage-map.json` é **vazio**: o `guard-writes -Stage sync` do frontmatter bloqueia toda escrita por construção, e o `stop-scan` confere que a tree saiu como entrou. Reparo de filesystem é re-rodar o estágio idempotente que o escreve (ex.: `/promote`) — nunca o `/sync`. Consequência direta: o `/sync` **não commita** — a única linha do mapa de commits do README §5 com "não".
 3. **`git fetch` PRIMEIRO.** `done` vs `closed` é pergunta sobre o **origin** — sem fetch a derivação mente. Fetch falho: avise **ruidosamente** e derive apenas o que não depende do origin; o que depende fica **indeterminado** no relatório, nunca chutado.
 4. **A derivação é parte do contrato, não improviso do modelo.** O estado de cada evidência sai da tabela de `.claude/factory-process.md`, reproduzida integralmente abaixo. Não invente heurística; na dúvida entre tabela e intuição, a tabela ganha.
-5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `update_body`, `comment_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
+5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `read_tasks`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `update_body`, `comment_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
 6. **`find_by_key` precede qualquer criação.** Re-execução recupera, não duplica — é o que torna o `/sync` idempotente e seguro de agendar. A trilha também é idempotente: `comment_feature` é ensure-por-marcador e `update_body` idêntico é no-op (contrato) — re-rodar o `/sync` nunca duplica nada.
 7. **Nunca delete nem esvazie card.** Órfão do board sem evidência no filesystem é **decisão humana**: vai ao relatório, não à lixeira — por duas razões de operação real: um operador com **checkout desatualizado** rodando `/sync` não pode destruir cards válidos criados por outro; e uma **limpeza deliberada do codebase** (arquivar épicos antigos) não pode quebrar o kanban. O contrato nem tem verbo de delete — por desenho. Órfão também não recebe `update_body`: sem evidência, não há o que projetar.
 8. **Try-reporta-prossegue.** Falha de board não trava o `/sync`: realinhe o que der, reporte nominalmente o que falhou. O reparo de um `/sync` que falhou é re-rodar o `/sync`.
@@ -90,7 +90,22 @@ A derivação é **por Feature** — a unidade que transita. Tasks filhas do boa
 
 ### 3. Ler o board e comparar
 
-O board-writer é também o único leitor: spawne-o com `read_board(filtro: itens com label factory-key)` e valide a saída estruturada:
+O board-writer é também o único leitor, e **a leitura é em duas fases** — porque task não
+tem `factory-key` própria (a identidade dela é o par Feature pai + título, contrato):
+
+- **(a)** `read_board(filtro: itens com factory-key)` → Epics e Features;
+- **(b)** para cada Feature lida, `read_tasks(feature_id)` → as tasks vêm por **relação
+  parent** (sub-itens da Feature), nunca por filtro de key — uma leitura filtrada por key
+  estruturalmente não as enxerga.
+
+**Proibição epistêmica:** ausência de task na fase (a) **não é evidência de nada** — só a
+fase (b) responde se uma task existe no board. "Ausência é sinal" vale para glob preciso
+no filesystem; numa leitura filtrada do board, tratar ausência-na-leitura como
+ausência-no-board fabrica falso alarme (e criaria duplicatas se você "corrigisse" o que
+não estava faltando — o `find_by_key` antes de criar é a última rede, mas tasks nem têm
+key: a fase (b) é a única proteção delas).
+
+Spawne-o com as duas fases e valide a saída estruturada:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File ".claude/scripts/validate-agent-output.ps1" -Required "executed,failed,blocked"

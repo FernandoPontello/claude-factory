@@ -148,11 +148,19 @@ ops:
     args: { id: "$feature_id", fields: { "System.Tags": "append $tag" } }
 
   read_board:                             # /sync: varre por prefixo de identidade + hidrata em batch
+    # Epics/Features apenas — tasks NÃO carregam factory-key e não aparecem aqui (ver read_tasks)
     tool: search_workitem
     args: { searchText: "factory-key:", project: ["{binding.project}"] }
     then:
       - tool: wit_get_work_items_batch_by_ids
         args: { project: "{binding.project}", ids: "$result_ids" }
+
+  read_tasks:                             # tasks pela RELAÇÃO parent — nunca por filtro de key
+    tool: wit_get_work_item
+    args: { id: "$feature_id", project: "{binding.project}", expand: "relations" }
+    then:
+      - tool: wit_get_work_items_batch_by_ids
+        args: { project: "{binding.project}", ids: "$child_ids" }   # filhos via System.LinkTypes.Hierarchy-Forward
 
   wiki_publish_page:                      # capability wiki: native (opt-in — default da factory é repo-markdown)
     tool: wiki_create_or_update_page

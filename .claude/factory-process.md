@@ -55,7 +55,8 @@ comment_feature(feature_id, body)             # trilha do ciclo no card
 update_body(item_id, body, key?)              # re-projeta a descrição (key: providers com identidade na descrição)
 link_related(feature_id, feature_id)
 tag_feature(feature_id, tag)                  # tags semânticas (ex: bug)
-read_board(filtro) → estado
+read_board(filtro) → estado                   # Epics e Features (itens COM factory-key)
+read_tasks(feature_id) → tasks                # tasks vêm por RELAÇÃO PARENT — nunca por filtro de key
 wiki_publish_page(root, slug, content)        # create-or-update, NUNCA delete
 wiki_read_index(root) → índice
 ```
@@ -109,6 +110,12 @@ de duplicar. É o que torna `/promote`, `/bug` e `/sync` idempotentes.
   admin): ali a coluna degrada e o round-trip precisa do marcador. Provider com os 6
   estados exatos e validados declara `stage_label: none` — o estado nativo É o contrato,
   o `/sync` deriva dele, e nenhum marcador redundante polui o card.
+- **Tasks não carregam `factory-key` própria** — a identidade delas é o par (Feature pai,
+  título `NNN — <título>`). Consequência epistêmica que vale para qualquer leitor:
+  **leitura de tasks é sempre por relação parent (`read_tasks`), nunca por filtro de
+  key** — uma leitura filtrada por key estruturalmente não as enxerga, e **ausência numa
+  leitura filtrada não é evidência de ausência no board**. "Ausência é sinal" vale para
+  glob preciso no filesystem; no board, só a leitura pela relação responde.
 
 ## Derivação de estado (consumida pelo `/sync`)
 

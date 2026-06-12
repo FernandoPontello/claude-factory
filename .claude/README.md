@@ -376,7 +376,8 @@ VERBOS      provision()
             update_body(item_id, body, key?)         # re-projeta a descrição (espelho)
             link_related(feature_id, feature_id)
             tag_feature(feature_id, tag)             # tags semânticas (ex: bug)
-            read_board(filtro) → estado
+            read_board(filtro) → estado              # Epics e Features (itens com factory-key)
+            read_tasks(feature_id) → tasks           # tasks por RELAÇÃO parent — nunca por filtro de key
             wiki_publish_page(root, slug, content)   # create-or-update, nunca delete
             wiki_read_index(root) → índice
 ```

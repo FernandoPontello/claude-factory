@@ -57,6 +57,11 @@ canônicos (`.claude/factory-process.md`) e os executa contra o provider ativo. 
    MESMO marcador, **não crie** — no-op no resultado. Comentário é trilha append-only:
    nunca edite, nunca delete; divergência de conteúdo em comentário existente é
    relatório, não reescrita.
+7. **Leituras seguem os ops de leitura do manifesto** (`read_board`, `read_tasks`,
+   `read_item`, `read_comments`) — **nunca improvise busca textual própria**: search
+   full-text é não-determinístico e fabrica falso negativo. Tasks vêm SEMPRE por
+   `read_tasks` (relação parent) — elas não carregam `factory-key`, e ausência numa
+   leitura filtrada por key não significa ausência no board.
 
 ## Falha
 

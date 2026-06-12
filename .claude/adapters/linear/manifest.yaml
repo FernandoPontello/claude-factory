@@ -179,9 +179,16 @@ ops:
     tool: save_issue
     args: { id: "$feature_id", labels: "add {binding.label_ids.$tag}" }
 
-  read_board:
+  read_board: # Epics/Features: lista o TEAM inteiro (paginar até o fim) e filtra LOCALMENTE
+    # pelo marcador factory-key na descrição — NUNCA full-text search por "factory-key:"
+    # (o search do Linear é não-determinístico: acha umas, perde outras)
     tool: list_issues
     args: { team: "{binding.team_id}", project: "$epic_id?", state: "$stage?" }
+
+  read_tasks: # tasks pela RELAÇÃO parent — nunca por filtro de key (task não tem identidade própria)
+    tool: get_issue
+    args: { id: "$feature_id" }
+    returns: subIssues # a Issue pai carrega as sub-issues; hidratar cada uma (get_issue) se a comparação exigir descrição/comentários
 
   wiki_publish_page: { unsupported: true } # documentos do MCP são somente leitura → wiki.provider: repo-markdown
   wiki_read_index: { unsupported: true }
