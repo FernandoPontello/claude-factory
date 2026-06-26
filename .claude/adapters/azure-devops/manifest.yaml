@@ -3,22 +3,34 @@
 # Tools pinados contra o TOOLSET oficial do microsoft/azure-devops-mcp.
 # Nota: clientes podem exibir os nomes com namespace (ex: mcp_ado_wit_create_work_item);
 # o resolve do /setup casa por sufixo. O /setup valida cada tool via tools/list.
+#
+# Hierarquia: epic→Epic, feature→Feature, task→USER STORY (nível-requisito, nativo e VISÍVEL no
+#   board/backlog sob a Feature). O tipo nativo "Task" do ADO (passo de hora) NÃO é usado pela
+#   factory. Tempo→comentário (User Story não tem CompletedWork — esse campo é de Task/Bug).
+# Conexão: LOCAL stdio + azcli (headless via `az login` na máquina); o remoto Entra/OAuth ainda
+#   NÃO suporta o Claude Code como cliente — ver ADAPTER.md §1.
+# Formas de argumento: alinhadas ao schema real do toolset — wit_create_work_item.fields[] (lista
+#   {name,value,format?}), wit_add_child_work_items.items[] (lista {title,description,format?}),
+#   wit_update_work_item.updates[] (patches {op,path,value}), wit_work_items_link.updates[]. São
+#   VALIDADAS pelo /setup via resolve.check: tool_arg_schemas; o smoke (ADAPTER §5) é a prova em runtime.
 
 provider: azure-devops
 
 mcp:
-  preferred: remote                       # recomendação oficial; o local será substituído com o tempo
-  remote:
-    transport: http
-    url: "https://mcp.dev.azure.com/${binding.organization}"
-    # Auth: Entra ID via fluxo do cliente (/mcp na primeira sessão).
-    # Endurecimento opcional do board-writer: headers X-MCP-Toolsets / X-MCP-Readonly — ver ADAPTER.md §1.
-  local:                                  # fallback stdio (Node 20+)
+  preferred: local                        # o board-writer roda como sub-agent HEADLESS: precisa de credencial sem
+                                          # browser. O servidor inline não herda OAuth de servidor de sessão e não
+                                          # abre browser — por isso local+azcli, não o remoto Entra. Ver ADAPTER.md §1.
+  local:                                  # stdio (Node 20+); credencial estabelecida FORA DE BANDA (az login), usada headless
     transport: stdio
     command: npx
     args: ["-y", "@azure-devops/mcp", "${binding.organization}",
            "-d", "core", "work-items", "search", "wiki",
-           "--authentication", "azcli"]   # alternativas: interactive | envvar | pat — ADAPTER.md §1
+           "--authentication", "azcli"]   # cada operador roda `az login` 1x na máquina; alt. headless: pat | envvar — ADAPTER.md §1
+  remote:                                 # FUTURO — public preview; hoje só VS / VS Code (Copilot), NÃO Claude Code (ADAPTER.md §1)
+    transport: http
+    url: "https://mcp.dev.azure.com/${binding.organization}"
+    # Auth: Entra ID (OAuth interativo). Quando o Claude Code virar cliente suportado, avaliar preferred: remote.
+    # Headers de endurecimento aceitos: X-MCP-Toolsets / X-MCP-Readonly.
 
 binding:                                  # validado/persistido pelo /setup no kanban-config.json
   organization: "${kanban-config.board.organization}"
@@ -27,7 +39,8 @@ binding:                                  # validado/persistido pelo /setup no k
 entities:
   epic: "Epic"                            # work item type
   feature: "Feature"
-  task: "Task"
+  task: "User Story"                      # a task canônica (1 commit + ACs) é, em ADO, uma User Story — filha
+                                          # nativa e VISÍVEL da Feature. O tipo "Task" do ADO não é usado pela factory.
 
 states:                                   # System.State da Feature — exige o processo herdado "Factory" (conduzido pelo /setup via prerequisites:)
   ready: "Ready"
@@ -37,18 +50,22 @@ states:                                   # System.State da Feature — exige o 
   done: "Done"
   closed: "Closed"
 
-task_done_state: "Closed"                 # Task (Agile base): New → Active → Closed
+task_done_state: "Closed"                 # User Story (Agile, estados de FÁBRICA — não customizados): New → Active → Resolved → Closed
 
 prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta só o inverificável
   - id: mcp_connection
-    verify: { mcp: tools_list_responds }
+    verify: { mcp: tools_list_responds }     # com azcli, esta verificação só passa se `az login` já foi feito NESTA máquina
     fix: |
-      Conecte o MCP do Azure DevOps (exige conta Microsoft e organização — dev.azure.com;
-      em Organization settings → Policies, habilite "Third-party application access via
-      OAuth"; convide o segundo operador em Organization settings → Users, nível Basic):
-        Remoto (recomendado): claude mcp add --transport http ado https://mcp.dev.azure.com/<org>
-        Local (fallback):     claude mcp add ado -- npx -y @azure-devops/mcp <org> -d core work-items search wiki --authentication azcli
-      Rode /mcp para autenticar. Reinicie a sessão e re-rode /setup.
+      O board-writer roda headless (sub-agent): a credencial tem de estar na MÁQUINA, sem
+      browser em runtime. Caminho atual = servidor LOCAL stdio + azcli (o remoto Entra/OAuth
+      ainda não suporta Claude Code — ADAPTER.md §1). Nesta máquina, uma vez:
+        1. Instale Node 20+ e a Azure CLI; convide o operador na org (Org settings → Users, Basic).
+        2. az login          (no tenant da organização — dev.azure.com)
+           az account show   (confirma o tenant certo)
+      Não é preciso `claude mcp add`: o board-writer carrega o servidor inline. Reinicie a
+      sessão e re-rode /setup. (Sem Azure CLI: --authentication pat|envvar com o token numa
+      variável de ambiente, nunca no repo — ADAPTER.md §1.)
+    note: "cada operador faz isto 1x por máquina — é o passo que falta quando 'o board não atualiza' num dev novo"
   - id: project
     input:  { ask: "Qual o nome do projeto no Azure DevOps?", bind: project }
     verify: { tool: core_list_projects, match: "name == $project" }
@@ -63,13 +80,24 @@ prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta
         adicionar Ready (Proposed) · Design, In Progress e Review (In Progress) ·
         Done (Resolved); ocultar New, Active e Resolved; manter Closed (Completed).
       Com New oculto, toda Feature nasce em Ready. A base Agile é obrigatória
-      (hierarquia Epic > Feature e campo Completed Work na Task). Projeto existente
-      em Agile migra por: Process → Agile → Projects → ⋯ → Change process → Factory.
+      (hierarquia nativa Epic > Feature > User Story — a task da factory é uma User
+      Story). Projeto existente em Agile migra por: Process → Agile → Projects → ⋯ →
+      Change process → Factory.
     note: "divergência de nome de estado falha-rápido na primeira transição (try-reporta-prossegue + /sync reparam)"
 
 resolve:                                  # /setup roda uma vez
   - { tool: core_list_projects, expect: "binding.project presente na lista" }
   - { check: tools_list_contains, tools: [ wit_create_work_item, wit_update_work_item, wit_add_child_work_items, wit_work_items_link, wit_get_work_item, wit_get_work_items_batch_by_ids, wit_add_work_item_comment, wit_list_work_item_comments, search_workitem, wiki_list_wikis, wiki_create_or_update_page ] }
+  - check: tool_arg_schemas               # valida as FORMAS de argumento, não só os nomes — drift de forma é tão real quanto de nome
+    expectations:                         # uma string por tool: "args... — nota"; sufixo [] = a forma esperada é LISTA, não objeto
+      wit_create_work_item:            "project?, workItemType, fields[] — fields = lista de {name, value, format?}"
+      wit_add_child_work_items:        "parentId, project?, workItemType, items[] — items = lista de {title, description, format?}; workItemType único p/ todo o lote"
+      wit_update_work_item:            "id, updates[] — updates = lista de patches {op, path, value}"
+      wit_work_items_link:             "project?, updates[] — updates = lista de {id, linkToId, type, comment?}"
+      wit_add_work_item_comment:       "project?, workItemId, comment, format?"
+      search_workitem:                 "searchText, project?[], workItemType?[], state?[], top? — filtros são listas de string"
+      wit_get_work_item:               "id, project?, fields?[], expand?"
+      wit_get_work_items_batch_by_ids: "project?, ids[], fields?[]"
   # Estados não são listáveis via MCP: o contrato é o pré-requisito inherited_process
   # (prerequisites:); divergência de nome falha-rápido na primeira transição
   # (try-reporta-prossegue + /sync).
@@ -77,18 +105,34 @@ resolve:                                  # /setup roda uma vez
 ops:
   create_epic:
     tool: wit_create_work_item
-    args: { project: "{binding.project}", workItemType: "{entities.epic}", fields: { "System.Title": "$title", "System.Description": "$body" } }
+    args:
+      project: "{binding.project}"
+      workItemType: "{entities.epic}"
+      fields:                             # wit_create_work_item.fields = LISTA de {name, value, format?}
+        - { name: "System.Title", value: "$title" }
+        - { name: "System.Description", value: "$body", format: "Markdown" }
     then:
       - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
-        args: { id: "$created_id", fields: { "System.Tags": "factory-key:$key" } }
+        args:
+          id: "$created_id"
+          updates:                        # wit_update_work_item.updates = LISTA de patches {op, path, value}
+            - { op: "add", path: "/fields/System.Tags", value: "factory-key:$key" }
     returns: id
 
   create_feature:                         # nasce filha do Epic, já em Ready (New está oculto no processo Factory)
     tool: wit_add_child_work_items
-    args: { parentId: "$epic_id", project: "{binding.project}", workItemType: "{entities.feature}", title: "$title", description: "$body" }
+    args:
+      parentId: "$epic_id"
+      project: "{binding.project}"
+      workItemType: "{entities.feature}"
+      items:                              # wit_add_child_work_items.items = LISTA de {title, description, format?}
+        - { title: "$title", description: "$body", format: "Markdown" }
     then:
       - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
-        args: { id: "$created_id", fields: { "System.Tags": "factory-key:$key" } }
+        args:
+          id: "$created_id"
+          updates:
+            - { op: "add", path: "/fields/System.Tags", value: "factory-key:$key" }
     returns: id
 
   find_by_key:                            # sem WIQL ad-hoc no toolset → busca de work items (domínio search)
@@ -100,35 +144,45 @@ ops:
     tool: wit_update_work_item
     args:
       id: "$feature_id"
-      fields:
-        "System.State": "{states.$stage}"
+      updates:
+        - { op: "add", path: "/fields/System.State", value: "{states.$stage}" }
     returns: ok
 
-  create_task:
+  create_task:                            # task canônica = User Story filha da Feature (entities.task); nasce em "New"
     tool: wit_add_child_work_items
-    args: { parentId: "$feature_id", project: "{binding.project}", workItemType: "{entities.task}", title: "$title", description: "$body" }
+    args:
+      parentId: "$feature_id"
+      project: "{binding.project}"
+      workItemType: "{entities.task}"
+      items:
+        - { title: "$title", description: "$body", format: "Markdown" }
     returns: id
 
-  complete_task:
+  complete_task:                          # User Story não tem CompletedWork (campo de Task/Bug) → tempo vira comentário
     tool: wit_update_work_item
     args:
       id: "$task_id"
-      fields:
-        "System.State": "{task_done_state}"
-        "Microsoft.VSTS.Scheduling.CompletedWork": "$minutes / 60"     # campo nativo em HORAS — converter
+      updates:
+        - { op: "add", path: "/fields/System.State", value: "{task_done_state}" }
     then:
+      - when: "$minutes != null"
+        tool: wit_add_work_item_comment   # capability time: comment — marcador canônico ⏱ factory:
+        args: { project: "{binding.project}", workItemId: "$task_id", comment: "⏱ factory: $minutes min" }
       - when: "$note != null"
-        tool: wit_add_work_item_comment   # aprendizado da implementação
-        args: { project: "{binding.project}", workItemId: "$task_id", comment: "$note" }
+        tool: wit_add_work_item_comment   # aprendizado da implementação ([factory:note])
+        args: { project: "{binding.project}", workItemId: "$task_id", comment: "$note", format: "Markdown" }
     returns: ok
 
   comment_feature:                        # trilha do ciclo: design.md, closure-notes.md
     tool: wit_add_work_item_comment
-    args: { project: "{binding.project}", workItemId: "$feature_id", comment: "$body" }
+    args: { project: "{binding.project}", workItemId: "$feature_id", comment: "$body", format: "Markdown" }
 
   update_body:                            # re-projeção da descrição (espelho) — identidade é tag, descrição fica limpa
     tool: wit_update_work_item
-    args: { id: "$item_id", fields: { "System.Description": "$body" } }
+    args:
+      id: "$item_id"
+      updates:
+        - { op: "add", path: "/fields/System.Description", value: "$body" }
     returns: ok
 
   read_item:                              # leitura para o no-op do update_body (comparar descrição atual)
@@ -141,11 +195,17 @@ ops:
 
   link_related:
     tool: wit_work_items_link
-    args: { project: "{binding.project}", id: "$feature_id", linkToId: "$related_id", type: "related" }
+    args:
+      project: "{binding.project}"
+      updates:                            # wit_work_items_link.updates = LISTA de {id, linkToId, type, comment?}
+        - { id: "$feature_id", linkToId: "$related_id", type: "related" }
 
-  tag_feature:
+  tag_feature:                            # Tag é SET, não patch: o board-writer lê as tags atuais (read_item) e regrava o conjunto
     tool: wit_update_work_item
-    args: { id: "$feature_id", fields: { "System.Tags": "append $tag" } }
+    args:
+      id: "$feature_id"
+      updates:
+        - { op: "add", path: "/fields/System.Tags", value: "$tags_merged" }   # $tags_merged = tags atuais + $tag (sep. "; "), preservando as existentes
 
   read_board:                             # /sync: varre por prefixo de identidade + hidrata em batch
     # Epics/Features apenas — tasks NÃO carregam factory-key e não aparecem aqui (ver read_tasks)
@@ -171,12 +231,12 @@ ops:
     args: { project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}" }
 
 capabilities:
-  hierarchy: native                       # Epic > Feature > Task via add_child / parent links
-  tasks: native                           # Task filha direto da Feature (caveat de taskboard — ADAPTER.md §4)
+  hierarchy: native                       # Epic > Feature > User Story via add_child / parent links
+  tasks: native                           # task canônica = User Story filha da Feature — nativa e VISÍVEL no board (ADAPTER.md §4)
   states: validate-only                   # estados custom vivem no processo herdado (conduzido pelo /setup via prerequisites:); MCP não os cria
   identity: tag                           # factory-key como System.Tags — dinâmica, nada a provisionar
   stage_label: none                       # 6 estados exatos do processo Factory — o System.State é o contrato; marcador só em provider que colapsa estados
-  time: field                             # Microsoft.VSTS.Scheduling.CompletedWork (horas) na Task
+  time: comment                           # User Story não tem CompletedWork → minutos viram comentário "⏱ factory:" (ADAPTER.md §4)
   related: native                         # wit_work_items_link
   tags: native                            # tags do ADO são criadas ao aplicar
   search: required                        # find_by_key depende do domínio search (Work Item Search)

@@ -353,7 +353,7 @@ Provider: linear
   wiki    → repo-markdown      (default da factory; Linear Docs é opt-in)
 ```
 
-(Zero degradação — ex: Azure DevOps — imprime o relatório do mesmo jeito: "tudo nativo".)
+(Pouca degradação — ex: Azure DevOps, só `tempo → comentário` (User Story não tem campo de tempo) — imprime o relatório do mesmo jeito.)
 
 **GATE: o operador aceita a degradação antes de o binding virar definitivo (passo 5).** É a
 Lei da Factory aplicada ao encaixe: você expõe o trade-off; ele decide.
@@ -396,7 +396,7 @@ interativo; não-interativo fica no default (ou no valor já existente do re-run
 | Placeholder | Valor |
 |---|---|
 | `PROVIDER` | slug do provider (nome do server MCP no frontmatter) |
-| `MCP_SERVER_JSON` | o bloco `mcp:` do manifesto como JSON inline, com `${org}`/`${project}` **resolvidos** pelo binding — o agent não depende de expansão de variável que a plataforma não promete |
+| `MCP_SERVER_JSON` | o bloco do servidor **preferido** (`mcp.preferred`) do manifesto como JSON inline, com `${org}`/`${project}` **resolvidos** pelo binding. Credencial **nunca literal**: ou é credencial de máquina fora de banda (ex.: ADO local/azcli via `az login`), ou um token por `env`/`headers` referenciado com `${VAR}` (a plataforma expande `${VAR}`; `org`/`project` ela não promete expandir — por isso resolvidos aqui). O board-writer roda headless: o servidor preferido tem de autenticar **sem browser** (OAuth interativo não serve a sub-agent — ver ADAPTER.md do provider) |
 | `TOOLS` | as tools pinadas do manifesto (`ops.*.tool`, deduplicadas), cada uma prefixada `mcp__<provider>__` |
 | `MAX_TURNS` | `3 × maior lote de verbos + 4`. Estime o maior lote plausível do projeto (regra prática: `/promote` com o máximo de PRDs por promoção que o operador espera, ou `/sync` realinhando o board inteiro; default razoável: lote 12 → `maxTurns: 40`) |
 | `HOOK_GATE` / `HOOK_LOGFAIL` | comando de `board-gate` / `board-log-failure` na variante do SO (passo 1) |
