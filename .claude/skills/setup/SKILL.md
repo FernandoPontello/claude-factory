@@ -353,7 +353,7 @@ Provider: linear
   wiki    → repo-markdown      (default da factory; Linear Docs é opt-in)
 ```
 
-(Pouca degradação — ex: Azure DevOps, só `tempo → comentário` (User Story não tem campo de tempo) — imprime o relatório do mesmo jeito.)
+(Zero degradação de capability — ex: Azure DevOps, tudo nativo; o tempo usa o campo `Completed Work` adicionado à User Story no processo Factory — passo de processo, não degradação. Imprime o relatório do mesmo jeito.)
 
 **GATE: o operador aceita a degradação antes de o binding virar definitivo (passo 5).** É a
 Lei da Factory aplicada ao encaixe: você expõe o trade-off; ele decide.

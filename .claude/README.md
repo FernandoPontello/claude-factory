@@ -448,7 +448,7 @@ Cada manifesto declara o que entrega nativamente e o que degrada. Mapeamento ilu
 | Feature | Feature | Story | Issue | Issue (board = Projects v2) | item do database |
 | Task | User Story filha | Sub-task | Sub-issue | Sub-issue | checklist no corpo |
 | 6 estados | colunas provisionáveis | workflow frequentemente travado → label carrega o estágio | workflow states provisionáveis | Status field provisionável | select provisionável |
-| Tempo (min) | sem campo → comment | worklog | sem campo → comment | number field criável | number property |
+| Tempo (min) | CompletedWork (add. à User Story) | worklog | sem campo → comment | number field criável | number property |
 | Wiki nativa | ADO Wiki | Confluence | Linear Docs | GitHub Wiki | páginas |
 
 No `/setup`, depois de provisionar (a factory é **provision-only**: o board nasce no formato canônico, não se adapta a board pré-existente), o relatório de degradação é impresso — *"Linear: épico→Project, tempo→comment, tasks→sub-issues"* — e **o operador aceita ou não**. É a Lei da Factory aplicada ao encaixe.

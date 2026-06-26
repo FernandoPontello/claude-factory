@@ -6,7 +6,8 @@
 #
 # Hierarquia: epic→Epic, feature→Feature, task→USER STORY (nível-requisito, nativo e VISÍVEL no
 #   board/backlog sob a Feature). O tipo nativo "Task" do ADO (passo de hora) NÃO é usado pela
-#   factory. Tempo→comentário (User Story não tem CompletedWork — esse campo é de Task/Bug).
+#   factory. Tempo→campo nativo CompletedWork (horas) na User Story — esse campo é de Task/Bug por
+#   padrão, então o processo Factory o ADICIONA (campo existente) ao WIT User Story (ADMIN-SETUP §2.2).
 # Conexão: LOCAL stdio + azcli (headless via `az login` na máquina); o remoto Entra/OAuth ainda
 #   NÃO suporta o Claude Code como cliente — ver ADAPTER.md §1.
 # Formas de argumento: alinhadas ao schema real do toolset — wit_create_work_item.fields[] (lista
@@ -73,17 +74,21 @@ prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta
       Crie em dev.azure.com → New project (Private), escolhendo em Advanced →
       Work item process o processo "Factory" (pré-requisito seguinte).
   - id: inherited_process
-    ask: "O projeto roda no processo herdado 'Factory', com os 6 estados na Feature? (processo é configuração de organização — o MCP não a enxerga)"
+    ask: "O projeto roda no processo herdado 'Factory', com (a) os 6 estados na Feature e (b) o campo Completed Work adicionado à User Story? (processo é configuração de organização — o MCP não a enxerga)"
     fix: |
       Organization settings → Boards → Process → card Agile → ⋯ → Create inherited
-      process → "Factory". Em Factory → work item type Feature → States:
-        adicionar Ready (Proposed) · Design, In Progress e Review (In Progress) ·
-        Done (Resolved); ocultar New, Active e Resolved; manter Closed (Completed).
-      Com New oculto, toda Feature nasce em Ready. A base Agile é obrigatória
-      (hierarquia nativa Epic > Feature > User Story — a task da factory é uma User
-      Story). Projeto existente em Agile migra por: Process → Agile → Projects → ⋯ →
-      Change process → Factory.
-    note: "divergência de nome de estado falha-rápido na primeira transição (try-reporta-prossegue + /sync reparam)"
+      process → "Factory". Em Factory:
+        • work item type Feature → States:
+            adicionar Ready (Proposed) · Design, In Progress e Review (In Progress) ·
+            Done (Resolved); ocultar New, Active e Resolved; manter Closed (Completed).
+            Com New oculto, toda Feature nasce em Ready.
+        • work item type User Story → New field → aba "Use an existing field" →
+            Completed Work (Microsoft.VSTS.Scheduling.CompletedWork) → Add. É onde o tempo
+            é gravado; sem o campo, o primeiro complete_task falha (try-reporta-prossegue).
+      A base Agile é obrigatória (hierarquia nativa Epic > Feature > User Story — a task
+      da factory é uma User Story). Projeto existente em Agile migra por: Process → Agile
+      → Projects → ⋯ → Change process → Factory.
+    note: "divergência de nome de estado falha-rápido na 1ª transição; ausência do campo Completed Work na User Story falha-rápido no 1º complete_task (try-reporta-prossegue + /sync reparam)"
 
 resolve:                                  # /setup roda uma vez
   - { tool: core_list_projects, expect: "binding.project presente na lista" }
@@ -158,7 +163,7 @@ ops:
         - { title: "$title", description: "$body", format: "Markdown" }
     returns: id
 
-  complete_task:                          # User Story não tem CompletedWork (campo de Task/Bug) → tempo vira comentário
+  complete_task:                          # tempo no campo nativo CompletedWork (horas) da User Story — campo ADICIONADO ao WIT no processo Factory (ADMIN-SETUP §2.2)
     tool: wit_update_work_item
     args:
       id: "$task_id"
@@ -166,8 +171,11 @@ ops:
         - { op: "add", path: "/fields/System.State", value: "{task_done_state}" }
     then:
       - when: "$minutes != null"
-        tool: wit_add_work_item_comment   # capability time: comment — marcador canônico ⏱ factory:
-        args: { project: "{binding.project}", workItemId: "$task_id", comment: "⏱ factory: $minutes min" }
+        tool: wit_update_work_item        # capability time: field — CompletedWork é Double em HORAS
+        args:
+          id: "$task_id"
+          updates:
+            - { op: "add", path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", value: "$minutes / 60" }   # minutos → horas (2 casas; ex.: 90 → 1.5)
       - when: "$note != null"
         tool: wit_add_work_item_comment   # aprendizado da implementação ([factory:note])
         args: { project: "{binding.project}", workItemId: "$task_id", comment: "$note", format: "Markdown" }
@@ -236,7 +244,7 @@ capabilities:
   states: validate-only                   # estados custom vivem no processo herdado (conduzido pelo /setup via prerequisites:); MCP não os cria
   identity: tag                           # factory-key como System.Tags — dinâmica, nada a provisionar
   stage_label: none                       # 6 estados exatos do processo Factory — o System.State é o contrato; marcador só em provider que colapsa estados
-  time: comment                           # User Story não tem CompletedWork → minutos viram comentário "⏱ factory:" (ADAPTER.md §4)
+  time: field                             # CompletedWork (horas) na User Story — campo adicionado ao WIT no processo Factory (ADMIN-SETUP §2.2; ADAPTER.md §4)
   related: native                         # wit_work_items_link
   tags: native                            # tags do ADO são criadas ao aplicar
   search: required                        # find_by_key depende do domínio search (Work Item Search)
