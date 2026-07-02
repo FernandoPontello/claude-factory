@@ -361,7 +361,7 @@ A factory não conhece Azure DevOps, Linear, Jira, GitHub ou Notion. Ela conhece
 **1. O contrato canônico** ([`.claude/factory-process.md`](.claude/factory-process.md)) — a única língua que as skills falam. Três entidades, seis estados, doze verbos:
 
 ```
-ENTIDADES   epic (agrupa) · feature (transita) · task (granula progresso)
+ENTIDADES   epic (agrupa) · feature (transita) · story (agrupa tasks por história — OPCIONAL) · task (granula progresso)
 
 ESTADOS     ready → design → in_progress → review → done → closed
 
@@ -370,14 +370,16 @@ VERBOS      provision()
             create_feature(epic_id, title, key, body?) → feature_id
             find_by_key(key) → feature_id | nulo    # identidade antes de criação (§7)
             move_feature(feature_id, stage)
-            create_task(feature_id, title, body?) → task_id
+            ensure_group(feature_id, group_key, title, body?) → group_id  # nível intermediário OPCIONAL (grouping); none → retorna feature_id
+            create_task(parent_id, title, body?) → task_id   # parent_id = group_id (grouping) ou feature_id
             complete_task(task_id, minutes?, note?)  # note = aprendizado da implementação
             comment_feature(feature_id, body)        # trilha do ciclo no card
             update_body(item_id, body, key?)         # re-projeta a descrição (espelho)
             link_related(feature_id, feature_id)
             tag_feature(feature_id, tag)             # tags semânticas (ex: bug)
-            read_board(filtro) → estado              # Epics e Features (itens com factory-key)
-            read_tasks(feature_id) → tasks           # tasks por RELAÇÃO parent — nunca por filtro de key
+            read_board(filtro) → estado              # SÓ Epics e Features — key com "#" é grupo/Story, fora daqui
+            read_groups(feature_id) → groups         # nível intermediário (grouping:native); none → vazio
+            read_tasks(feature_id) → tasks           # por RELAÇÃO parent; com grouping desce Feature→Story→Task
             wiki_publish_page(root, slug, content)   # create-or-update, nunca delete
             wiki_read_index(root) → índice
 ```
@@ -415,7 +417,8 @@ O fluxo: estágio conclui → commita → emite a lista de verbos canônicos →
 ```
 Epic    = o épico/projeto promovido (agrupador; aberto/fechado)
  └ Feature  = a feature (uma por PRD/design) — é o que transita pelos estados
-    └ Task  = as tasks do /tasks — progresso fino ("8 de 12") sem poluir o board
+    └ Story  = história de usuário do PRD — nível OPCIONAL (capability grouping; ex: ADO User Story)
+       └ Task  = as tasks do /tasks — progresso fino ("8 de 12") sem poluir o board
 ```
 
 ```
@@ -446,9 +449,10 @@ Cada manifesto declara o que entrega nativamente e o que degrada. Mapeamento ilu
 |---|---|---|---|---|---|
 | Epic | Epic | Epic | Project | Milestone | relation p/ página-épico |
 | Feature | Feature | Story | Issue | Issue (board = Projects v2) | item do database |
-| Task | User Story filha | Sub-task | Sub-issue | Sub-issue | checklist no corpo |
+| Story (grouping, opcional) | User Story | — (none) | — (none) | — (none) | — (none) |
+| Task | Task (filha da User Story) | Sub-task | Sub-issue | Sub-issue | checklist no corpo |
 | 6 estados | colunas provisionáveis | workflow frequentemente travado → label carrega o estágio | workflow states provisionáveis | Status field provisionável | select provisionável |
-| Tempo (min) | CompletedWork (add. à User Story) | worklog | sem campo → comment | number field criável | number property |
+| Tempo (min) | CompletedWork (nativo no Task) | worklog | sem campo → comment | number field criável | number property |
 | Wiki nativa | ADO Wiki | Confluence | Linear Docs | GitHub Wiki | páginas |
 
 No `/setup`, depois de provisionar (a factory é **provision-only**: o board nasce no formato canônico, não se adapta a board pré-existente), o relatório de degradação é impresso — *"Linear: épico→Project, tempo→comment, tasks→sub-issues"* — e **o operador aceita ou não**. É a Lei da Factory aplicada ao encaixe.
@@ -591,17 +595,23 @@ Estas viram a base do architecture-overview após o /ground.]
 [Que problema resolve, para quem, qual o valor. Linguagem de negócio.]
 
 ## Histórias de usuário
-[Como <persona>, quero <ação>, para <benefício>.]
+
+### US-1 — <título curto da história>
+Como <persona>, quero <ação>, para <benefício>.
+
+### US-2 — <título curto da história>
+Como <persona>, quero <ação>, para <benefício>.
 
 ## Critérios de aceite
-- AC-1: [condição objetiva e verificável]
-- AC-2: [condição objetiva e verificável]
+- AC-1 (US-1): [condição objetiva e verificável]
+- AC-2 (US-1): [condição objetiva e verificável]
+- AC-3 (US-2): [condição objetiva e verificável]
 
 ## Fora de escopo
 [O que esta feature explicitamente não cobre.]
 ```
 
-O PRD não contém solução técnica. Se começa a dizer "use tal tabela", invadiu o design. Os critérios de aceite são **numerados** (`AC-n`): essa identidade atravessa `design.md` (que os referencia), `task.md` (campo `ACs cobertos`) e `closure-notes.md` (cobertura verificada) — rastreabilidade ponta-a-ponta sem cerimônia adicional.
+O PRD não contém solução técnica. Se começa a dizer "use tal tabela", invadiu o design. Os critérios de aceite são **numerados globalmente** (`AC-n`): essa identidade atravessa `design.md` (que os referencia), `task.md` (campo `ACs cobertos`) e `closure-notes.md` (cobertura verificada) — rastreabilidade ponta-a-ponta sem cerimônia adicional. As **histórias também são numeradas** (`US-n`, com título curto) e **cada AC anota a história que realiza** (`AC-1 (US-1)`): é esse mapa AC→história que permite ao `/tasks` derivar a que história cada task pertence — e, em provider com nível intermediário (capability `grouping`, ex.: ADO), materializar cada `US-n` como card e pendurar as tasks nela. Todo AC pertence a exatamente **uma** história; critério transversal entra na história mais afim, não numa seção à parte.
 
 Para PRDs `Tipo: Bug fix` (gerados por `/bug`), o header usa `Reportado em` no lugar de `Promovido em`, e o corpo ganha seções de bug — `## Reprodução` e `## Causa provável` (hipótese com evidência) — com critério de aceite mínimo "a reprodução não produz mais o sintoma". A confirmação técnica da causa e o desenho do fix ficam no `/design` (modo bug).
 

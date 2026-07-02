@@ -92,17 +92,19 @@ sustentam. NÃO é confirmação: a confirmação técnica da causa e o desenho 
 fix são do /design (modo bug).]
 
 ## Histórias de usuário
-[Como <persona>, quero <ação>, para <benefício>.]
+
+### US-1 — <título curto>
+Como <persona>, quero <ação>, para <benefício>.
 
 ## Critérios de aceite
-- AC-1: a reprodução não produz mais o sintoma
-- AC-2: [condição objetiva e verificável, se houver]
+- AC-1 (US-1): a reprodução não produz mais o sintoma
+- AC-2 (US-1): [condição objetiva e verificável, se houver]
 
 ## Fora de escopo
 [O que este fix explicitamente não cobre.]
 ```
 
-O PRD não contém solução técnica. Os ACs são numerados (`AC-n`): essa identidade atravessa `design.md`, `task.md` (campo `ACs cobertos`) e `closure-notes.md` — rastreabilidade ponta-a-ponta. `AC-1` é sempre o mínimo canônico do bug fix: "a reprodução não produz mais o sintoma" — por isso a seção `## Reprodução` precisa ser executável, não narrativa. No primeiro write, `Board-ID` e `Board-URL` ficam com os placeholders; o vínculo vem no passo 6.
+O PRD não contém solução técnica. Os ACs são numerados globalmente (`AC-n`) e **cada um anota a história que realiza** (`AC-1 (US-1)`); as histórias são numeradas (`US-n` — num bug, tipicamente uma só). Essa identidade atravessa `design.md`, `task.md` (campo `ACs cobertos`) e `closure-notes.md` — rastreabilidade ponta-a-ponta. `AC-1` é sempre o mínimo canônico do bug fix: "a reprodução não produz mais o sintoma" — por isso a seção `## Reprodução` precisa ser executável, não narrativa. No primeiro write, `Board-ID` e `Board-URL` ficam com os placeholders; o vínculo vem no passo 6.
 
 ### 4. Commit + push
 

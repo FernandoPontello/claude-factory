@@ -48,6 +48,7 @@ A API do Linear opera por IDs, não nomes. O bloco `resolve:` do manifesto mapei
 - **Related é menção.** Não há tool de relations; um comentário citando o identifier (`FAB-12`) gera backlink automático no Linear — suficiente para o link pendência↔origem.
 - **Tempo é comentário.** Sem campo nativo de tempo; minutos do `complete_task` viram comentário `⏱ factory: N min`. O cycle time nativo do Linear (por transição de estado) permanece de graça.
 - **Sub-issue é `parentId` no `save_issue`.** A task canônica é uma Issue filha. O check de schema do `resolve:` confirma o argumento; se ausente em alguma versão futura, o fallback declarado é checklist na descrição da Feature.
+- **Sem nível de história (`grouping: none`).** O nível opcional `story` do contrato não existe no Linear: `ensure_group` é **no-op que devolve o próprio `feature_id`**, `read_groups` devolve vazio, e as tasks continuam sub-issues diretas da Issue-Feature — exatamente o comportamento de sempre. As histórias `US-n` do PRD chegam ao board dentro da descrição da Issue (o `prd.md` integral); nada muda na estrutura do board.
 - **Wiki não existe via MCP** (documentos são somente leitura). A faceta wiki fica em `repo-markdown` — que já é o default da factory.
 - **Epic é Project** (não Initiative — initiatives agrupam projects, um nível acima do contrato).
 

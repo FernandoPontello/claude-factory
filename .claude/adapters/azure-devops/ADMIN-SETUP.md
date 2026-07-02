@@ -39,9 +39,10 @@ caminho — se tiver dúvida, pode habilitar.
 ## Passo 2 — Criar o processo herdado "Factory" (base **Agile**)
 
 > **A base precisa ser Agile** (não Basic, não Scrum). O Agile traz nativamente a hierarquia
-> **Epic → Feature → User Story** — a ferramenta cria cada item de trabalho como uma **User
-> Story** filha da Feature (nível-requisito, visível no board e no backlog). O tempo de execução
-> é gravado no campo nativo **Completed Work**, que você adiciona à User Story no Passo 2.2.
+> completa **Epic → Feature → User Story → Task** — a ferramenta usa os quatro níveis: cada
+> história do PRD vira uma **User Story** filha da Feature, e as tarefas viram **Tasks** filhas
+> da User Story (visíveis no board, backlog e taskboard). O tempo de execução usa o campo
+> **Completed Work**, que já é **nativo no `Task`** — nada a adicionar.
 
 1. **Organization settings** → **Boards** → **Process**.
 2. Na lista de processos, passe o mouse sobre **Agile** → menu **⋯** → **Create inherited
@@ -50,9 +51,8 @@ caminho — se tiver dúvida, pode habilitar.
 
 ### 2.1 — Customizar os estados do work item type **Feature**
 
-> ⚠️ **Estados: customize APENAS o work item type `Feature`.** Não mexa nos estados de `Epic`,
-> `User Story` nem `Task` — eles ficam como vêm do Agile. A **única** mudança na `User Story` é
-> adicionar um campo (Passo 2.2) — nada de estados.
+> ⚠️ **Customize APENAS o work item type `Feature`** (os 6 estados abaixo). Não altere `Epic`,
+> `User Story` nem `Task` — eles ficam como vêm do Agile, sem mudança de estado nem de campo.
 
 1. Clique no processo **Factory** → na lista de **Work item types**, clique em **Feature** →
    aba **States**.
@@ -79,19 +79,11 @@ caminho — se tiver dúvida, pode habilitar.
 > 💡 Por que ocultar `New`: com `New` oculto e `Ready` na categoria *Proposed*, toda Feature
 > nova **nasce direto em `Ready`** — que é exatamente o que a ferramenta espera.
 
-### 2.2 — Adicionar o campo **Completed Work** à **User Story**
+### 2.2 — Campos personalizados
 
-A ferramenta registra o tempo de execução no campo nativo **Completed Work** (em horas). Esse
-campo existe no Agile, mas por padrão só na `Task`/`Bug` — então **adicione-o (campo existente)
-à `User Story`**:
-
-1. No processo **Factory** → work item type **User Story** → **New field** → aba **Use an
-   existing field**.
-2. Selecione **Completed Work** (referência `Microsoft.VSTS.Scheduling.CompletedWork`) → **Add**.
-
-> 💡 **Não é um campo *custom*** — é um campo de sistema existente sendo exposto na User Story.
-> Nenhum outro campo precisa ser criado, e as datas (criação, fechamento, mudança de estado) já
-> são automáticas em todos os tipos. A ferramenta usa só tags dinâmicas além deste campo.
+**Nenhum.** A ferramenta usa só campos que o Agile já fornece — incluindo **Completed Work**,
+que é **nativo no `Task`** — e tags dinâmicas. As datas (criação, fechamento, mudança de estado)
+são automáticas em todos os tipos. Não é preciso criar nem adicionar campo nenhum a nenhum tipo.
 
 ---
 
@@ -137,8 +129,7 @@ Para a(s) conta(s) que vão operar a ferramenta:
 - [ ] **Nome da organização** (o `<org>` da URL `dev.azure.com/<org>`): ________
 - [ ] **Nome exato do projeto**: ________
 - [ ] Processo **Factory** criado, base **Agile**, e a **Feature** com os 6 estados exatos
-      do Passo 2.1 (e `New`/`Active`/`Resolved` ocultos)
-- [ ] Campo **Completed Work** adicionado à **User Story** no processo Factory (Passo 2.2)
+      do Passo 2.1 (e `New`/`Active`/`Resolved` ocultos). `Epic`/`User Story`/`Task` intactos.
 - [ ] Projeto vinculado ao processo **Factory** (Passo 3)
 - [ ] (Só se for usar o servidor remoto/futuro) Policy **"Third-party application access via OAuth"** habilitada (Passo 1)
 - [ ] Conta(s) operadora(s) com acesso **Basic** + **Contributors** no projeto (Passo 5)

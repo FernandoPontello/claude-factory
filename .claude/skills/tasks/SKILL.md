@@ -39,14 +39,15 @@ Estágio Dev. Consome `design.md` + `prd.md` do épico e os decompõe em N tasks
    Quem preenche os dois é o `/code` — e mais ninguém.
 6. **Validações antes do gate:** todo AC do PRD coberto por ≥ 1 task (AC descoberto =
    avisar o operador); grafo sem ciclos; `Toca` de tasks paralelizáveis preferencialmente
-   disjunto.
+   disjunto; **toda task com história derivável** (via `ACs cobertos` → mapa AC→US do PRD;
+   task cross-história ou sem AC = decisão do operador no gate).
 7. **Não invente ACs** fora do PRD e **não improvise arquitetura**: se o `design.md` não
    sustenta a decomposição, devolva ao operador e sugira voltar ao `/design` (§16).
 8. **Commit canônico como último ato de escrita:** `factory(tasks): <slug> — N tasks + grafo`.
    `git add` **nominal** — path explícito por arquivo, nunca `.` ou `-A`.
 9. **Board só depois do commit**, e só por verbos canônicos de `.claude/factory-process.md`
-   (`find_by_key`, `create_task`), emitidos ao agent `board-writer` — **nunca** nome de tool
-   de provider. Falha de board = try-reporta-prossegue ("rode `/sync` depois").
+   (`find_by_key`, `ensure_group`, `create_task`), emitidos ao agent `board-writer` — **nunca**
+   nome de tool de provider. Falha de board = try-reporta-prossegue ("rode `/sync` depois").
 10. **A Feature NÃO muda de estado** neste estágio. `/tasks` só cria Tasks filhas.
 
 ## Sessão e pré-condições
@@ -75,7 +76,11 @@ você ver o prompt; tree suja fora do write-set deste estágio é tripwire — r
 ## Inputs
 
 - **`prd.md`** — a lista de critérios de aceite numerados (`AC-1`, `AC-2`…): é o universo a
-  cobrir, e dele você não sai. E o `Board-ID` do header.
+  cobrir, e dele você não sai. As **histórias numeradas** (`### US-n — <título>`) e a anotação
+  `(US-m)` de cada AC formam o **mapa AC→história** — é dele que a história de cada task
+  deriva (abaixo). E o `Board-ID` do header. **PRD legado sem `US-n`** (formato anterior):
+  degrade sem drama — não há histórias a derivar; as tasks penduram direto na Feature no board
+  (lote sem `ensure_group`) e nada mais muda.
 - **`design.md`** — a fonte da decomposição: `## Componentes a construir/modificar` tende a
   mapear para tasks (cada bloco vira uma ou mais); `## Abordagem técnica` diz que padrão
   seguir e que módulos tocar (alimenta `Toca` e `Contexto`); `## Riscos e incógnitas`
@@ -107,6 +112,25 @@ atravessa PRD → design → task → `closure-notes.md`: o `/close` verifica co
 campo. Um AC pode ser coberto por mais de uma task; uma task pode não cobrir AC nenhum
 (infra, refactor preparatório) — mas a soma das tasks precisa cobrir todos.
 
+**A história de cada task — derivada, nunca declarada.** A task **não** tem campo de história
+(o template §12.5 não muda): a história dela deriva do mapa AC→US do PRD aplicado aos
+`ACs cobertos`. As regras, na ordem:
+
+1. Todos os ACs da task pertencem à mesma `US-n` → essa é a história da task.
+2. Task **sem AC** (infra, refactor): herda a história do(s) **dependentes diretos** no grafo,
+   se única; ambígua ou inexistente → decisão do operador no gate (escolher uma história do
+   PRD — nunca inventar história nova).
+3. Task **cross-história** (ACs de mais de uma `US`): smell de decomposição — sinalize no gate
+   e devolva ao operador: dividir a task (preferível) ou escolher a história dona. A cobertura
+   de ACs não se altera com a escolha — o card só pendura num lugar.
+
+A história importa só para a **projeção** (em provider com `grouping`, o card da task pendura
+no card da `US-n`); pela regra 1 ela deriva **mecanicamente** do filesystem a qualquer momento
+— por isso não se grava. As regras 2–3 envolvem decisão de operador, que materializa **no
+board** (o card pendura no grupo escolhido), não em arquivo: uma reprojeção do zero dessas
+tasks re-devolve a decisão ao operador — é exatamente o que o `/sync` faz (só o mecânico
+executa sozinho; decisão vai ao relatório).
+
 **Granularidade.** A maioria dos épicos rende 2–7 tasks. Cada task fecha em **um commit** do
 `/code` e tem `Critério de pronto` objetivo e verificável. O `Contexto` precisa bastar para
 o `/code` agir sem reler o design inteiro: arquivos de partida, módulos envolvidos, decisões
@@ -116,7 +140,7 @@ Slug curto em kebab-case, sem acentos.
 
 ## Validações antes do gate
 
-Rode as três sobre a decomposição proposta, antes de apresentá-la:
+Rode as quatro sobre a decomposição proposta, antes de apresentá-la:
 
 1. **Cobertura de ACs.** Monte a matriz AC → tasks. Todo AC do PRD coberto por ≥ 1 task.
    **AC descoberto = avisar o operador** — ele decide: criar task, ou aceitar o descoberto
@@ -126,15 +150,21 @@ Rode as três sobre a decomposição proposta, antes de apresentá-la:
 3. **Disjunção de `Toca`.** Pares de tasks sem dependência entre si (potencialmente
    paralelizáveis) devem preferencialmente ter `Toca` disjunto. Sobreposição não é erro —
    o modo paralelo serializa esses pares (§10) — mas aponte cada sobreposição ao operador.
+4. **História derivável por task.** Aplique as regras de derivação (acima) a cada task e monte
+   o mapa task → `US-n`. Task cross-história ou sem história derivável **não é erro que te
+   trava** — é decisão sinalizada no gate. (PRD legado sem `US-n`: validação inteira não se
+   aplica; siga sem histórias.)
 
 ## GATE: o operador valida a decomposição
 
 Apresente, em conversa (nada escrito ainda):
 
-- a tabela `ID · Título · Depende de · Toca · ACs cobertos`;
+- a tabela `ID · Título · História (US-n) · Depende de · Toca · ACs cobertos`;
 - a matriz de cobertura AC → tasks (e qualquer AC descoberto, em destaque);
 - o desenho do grafo em texto (ex: `001 → 002 → 003; 004 depende de 002`);
-- sobreposições de `Toca` entre tasks independentes, se houver.
+- sobreposições de `Toca` entre tasks independentes, se houver;
+- **decisões de história pendentes**, em destaque: tasks cross-história (dividir ou escolher a
+  dona?) e tasks sem história derivável (herdar de qual?). A escolha é do operador.
 
 **GATE: o operador valida a decomposição antes de qualquer arquivo ser escrito.** Ajuste e
 re-apresente quantas vezes ele pedir. A decomposição aprovada é a que vai para o disco —
@@ -193,22 +223,35 @@ Ex: `factory(tasks): checkout — 4 tasks + grafo`. Estágio que não commitou n
 
 ## Board (via board-writer)
 
-Só **depois** do commit. Monte o lote de verbos canônicos — uma Task filha por task criada,
-na ordem topológica:
+Só **depois** do commit. Monte o lote de verbos canônicos — um `ensure_group` por história
+**que tem task** (na ordem `US-1, US-2…`) e uma task filha por task criada, na ordem
+topológica, cada uma sob o `group_id` da sua história (mapa validado no gate):
 
 ```
 find_by_key("<factory-key do épico>")          # recupera/confirma o feature_id — identidade antes de criação
-create_task(<feature_id>, "001 — <título>", body=<conteúdo integral de 001-<slug>.md>)
-create_task(<feature_id>, "002 — <título>", body=<conteúdo integral de 002-<slug>.md>)
+ensure_group(<feature_id>, "<slug>#US-1", "US-1 — <título da história>",
+             body=<seção "### US-1 …" do prd.md + seus ACs>)   → group_us1
+ensure_group(<feature_id>, "<slug>#US-2", "US-2 — <título>", body=<seção US-2 + ACs>) → group_us2
+create_task(<group_us1>, "001 — <título>", body=<conteúdo integral de 001-<slug>.md>)
+create_task(<group_us1>, "002 — <título>", body=<conteúdo integral de 002-<slug>.md>)
+create_task(<group_us2>, "003 — <título>", body=<conteúdo integral de 003-<slug>.md>)
 ...
 ```
 
-A **descrição de cada card de task é o `task.md` integral** (projeção de conteúdo,
-`factory-process.md`) — quem olha o board lê o contrato da task sem abrir o repo.
+**Degradação declarada, mesmo lote:** em provider com `grouping: none` (ex.: Linear), o
+board-writer resolve `ensure_group` como no-op que devolve o próprio `feature_id` — as tasks
+penduram direto na Feature, comportamento de sempre. Você **não** ramifica o lote por
+provider; o manifesto decide. História **sem** task não gera `ensure_group` (card sem filho é
+ruído); PRD legado sem `US-n` → lote sem `ensure_group`, `create_task(<feature_id>, …)`.
 
-A `factory-key` é o slug da pasta do épico (re-entrada: `<slug>-pNNN`); o `feature_id` é o
-`Board-ID` do header. Em re-execução, crie cards só para tasks que ainda não os têm —
-recuperação, não duplicação.
+A **descrição de cada card de task é o `task.md` integral**, e a **descrição do card de
+história é a seção `US-n` do PRD com seus ACs** (projeção de conteúdo, `factory-process.md`)
+— quem olha o board lê o contrato sem abrir o repo.
+
+A `factory-key` é o slug da pasta do épico (re-entrada: `<slug>-pNNN`); a key de cada história
+é derivada: `<factory-key>#US-n`. O `feature_id` é o `Board-ID` do header. Em re-execução,
+crie cards só para tasks que ainda não os têm — recuperação, não duplicação (`ensure_group` já
+é find-or-create por construção).
 
 Sequência fixa: spawne o agent `board-writer` com o lote → valide a saída estruturada:
 

@@ -23,7 +23,7 @@ hooks:
 2. **Este estágio NUNCA escreve filesystem — nem para reparar.** O write-set de `sync` no `stage-map.json` é **vazio**: o `guard-writes -Stage sync` do frontmatter bloqueia toda escrita por construção, e o `stop-scan` confere que a tree saiu como entrou. Reparo de filesystem é re-rodar o estágio idempotente que o escreve (ex.: `/promote`) — nunca o `/sync`. Consequência direta: o `/sync` **não commita** — a única linha do mapa de commits do README §5 com "não".
 3. **`git fetch` PRIMEIRO.** `done` vs `closed` é pergunta sobre o **origin** — sem fetch a derivação mente. Fetch falho: avise **ruidosamente** e derive apenas o que não depende do origin; o que depende fica **indeterminado** no relatório, nunca chutado.
 4. **A derivação é parte do contrato, não improviso do modelo.** O estado de cada evidência sai da tabela de `.claude/factory-process.md`, reproduzida integralmente abaixo. Não invente heurística; na dúvida entre tabela e intuição, a tabela ganha.
-5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `read_tasks`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `update_body`, `comment_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
+5. **Só verbos canônicos** de `.claude/factory-process.md` (`read_board`, `read_groups`, `read_tasks`, `find_by_key`, `create_epic`, `create_feature`, `move_feature`, `ensure_group`, `create_task`, `update_body`, `comment_feature`, `tag_feature`, `link_related`) e nada mais. Nunca cite nome de tool de provider — quem traduz é o agent `board-writer`, único processo com a conexão MCP.
 6. **`find_by_key` precede qualquer criação.** Re-execução recupera, não duplica — é o que torna o `/sync` idempotente e seguro de agendar. A trilha também é idempotente: `comment_feature` é ensure-por-marcador e `update_body` idêntico é no-op (contrato) — re-rodar o `/sync` nunca duplica nada.
 7. **Nunca delete nem esvazie card.** Órfão do board sem evidência no filesystem é **decisão humana**: vai ao relatório, não à lixeira — por duas razões de operação real: um operador com **checkout desatualizado** rodando `/sync` não pode destruir cards válidos criados por outro; e uma **limpeza deliberada do codebase** (arquivar épicos antigos) não pode quebrar o kanban. O contrato nem tem verbo de delete — por desenho. Órfão também não recebe `update_body`: sem evidência, não há o que projetar.
 8. **Try-reporta-prossegue.** Falha de board não trava o `/sync`: realinhe o que der, reporte nominalmente o que falhou. O reparo de um `/sync` que falhou é re-rodar o `/sync`.
@@ -86,17 +86,28 @@ Cada Feature no board corresponde a exatamente **uma** evidência. O estado sai 
 - **Promoção incompleta:** `prd.md` sem `Board-ID` **não** é caso de o `/sync` criar card. O reparo oficial é re-rodar `/promote` — idempotente via `find_by_key`, ele cria/recupera o card **e** regrava o vínculo no header, coisa que o `/sync` não pode fazer (não escreve filesystem). Vai ao relatório como instrução.
 - **PRD fora do origin:** evidência local que o origin não contém = push pendente do PO — a verdade ainda não viajou. Relatório, com o path.
 
-A derivação é **por Feature** — a unidade que transita. Tasks filhas do board são progresso fino; divergência nelas é observação de relatório, não alvo de reconciliação.
+A derivação é **por Feature** — a unidade que transita. Tasks filhas do board são progresso
+fino, e as histórias (`US-n` do `prd.md`, materializadas como grupo em provider com
+`grouping`) são estrutura estática derivada do PRD: divergência de **estado** nelas é
+observação de relatório, não alvo de reconciliação; o que o `/sync` garante nelas é
+**existência e conteúdo** (grupo faltante para task existente; descrição divergente da seção
+`US-n` atual — ver o lote).
 
 ### 3. Ler o board e comparar
 
 O board-writer é também o único leitor, e **a leitura é em duas fases** — porque task não
 tem `factory-key` própria (a identidade dela é o par Feature pai + título, contrato):
 
-- **(a)** `read_board(filtro: itens com factory-key)` → Epics e Features;
+- **(a)** `read_board(filtro: itens com factory-key)` → **só** Epics e Features — o manifesto
+  filtra os grupos/Stories fora (eles também carregam key, com `#`: `<slug>#US-n`); se algum
+  item com `#` na key vazar na leitura, **ignore-o aqui** (é grupo — pertence à fase b), nunca
+  o trate como Feature nem como órfão;
 - **(b)** para cada Feature lida, `read_tasks(feature_id)` → as tasks vêm por **relação
-  parent** (sub-itens da Feature), nunca por filtro de key — uma leitura filtrada por key
-  estruturalmente não as enxerga.
+  parent**, nunca por filtro de key — uma leitura filtrada por key estruturalmente não as
+  enxerga. Em provider com `grouping`, o board-writer desce **dois níveis** pelo manifesto
+  (Feature → grupos `US-n` → tasks) e `read_groups(feature_id)` traz os grupos; em
+  `grouping: none`, `read_groups` devolve vazio e a leitura é de um nível — você não
+  ramifica nada: o manifesto decide.
 
 **Proibição epistêmica:** ausência de task na fase (a) **não é evidência de nada** — só a
 fase (b) responde se uma task existe no board. "Ausência é sinal" vale para glob preciso
@@ -147,6 +158,7 @@ move_feature(feature_id, <estado derivado>)
 
 # divergente em CONTEÚDO (caso 2): re-projetar o espelho — idempotente por contrato
 update_body(feature_id, <prd.md integral>, key=<factory-key>)        # Feature
+update_body(group_id, <seção "### US-n …" do prd.md + seus ACs>)     # cada grupo/história (grouping: native)
 update_body(task_id, <task.md integral>)                            # cada Task do épico
 update_body(<irmã>, <entrada do pending.md verbatim>, key=<slug>-pNNN)
 # (update_body idêntico é no-op — emitir para todo card casado é seguro; o board-writer compara)
@@ -163,9 +175,19 @@ se nulo:
   create_feature(epic_id, <título>, key=<factory-key>,
                  body=<o artefato de nascimento: prd.md, ou a entrada do pending.md verbatim>) → feature_id
   move_feature(feature_id, <estado derivado>)
-  # + a trilha derivável de docs/** (comment_feature acima) e as tasks (create_task com body)
+  # + a trilha derivável de docs/** (comment_feature acima) e as tasks com seus grupos:
+  #   ensure_group(feature_id, "<factory-key>#US-n", "US-n — <título>", body=<seção US-n + ACs>) → group_id
+  #     (SÓ a derivação MECÂNICA — regra 1 do /tasks: todos os ACs da task numa única US.
+  #      Task sem história mecânica — sem AC, ou ACs de mais de uma US — NÃO entra na criação
+  #      automática: vai ao relatório como decisão humana; no modo interativo o GATE a resolve.
+  #      grouping: none → no-op, devolve feature_id; PRD sem US-n → sem grupos)
+  #   create_task(group_id, "NNN — <título>", body=<task.md integral>)
   se Feature irmã (entrada de pending.md ou pasta -pNNN):
     link_related(feature_id, <Feature original>)
+
+# task existente sem grupo no board (grouping: native — divergência estrutural do caso 2):
+#   ensure_group + relatório — mover card de task existente para o grupo é ação humana
+#   (o contrato não tem verbo de re-parent; o ensure garante o grupo para as próximas)
 ```
 
 Restrições de criação:

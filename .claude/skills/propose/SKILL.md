@@ -24,7 +24,7 @@ hooks:
 2. **Âncora obrigatória:** `docs/overviews/product-overview.md`. O gate de pré-condições bloqueia o comando sem ele — se você está rodando, ele existe: **leia-o inteiro antes de qualquer recorte**. Os PRDs respeitam o que o sistema já é.
 3. **Write-set único:** `docs/proposals/<projeto-ou-cliente>/prd-<slug>.md`. Nada além disso — nem overviews, nem `docs/epics/**`, nem código. O `guard-writes` bloqueia; não contorne via Bash.
 4. **Linguagem de negócio, sempre.** PRD descreve problema, valor, comportamento e critério de aceite. PRD que diz "use tal tabela" invadiu o design — anti-pattern (README §16). Solução técnica é território do `/design`.
-5. **Critérios de aceite numerados** `AC-1`, `AC-2`… — condições objetivas e verificáveis. São a espinha de rastreabilidade que atravessa `design.md`, `task.md` (`ACs cobertos`) e `/close` (cobertura verificada). AC vago não fecha épico.
+5. **Histórias numeradas (`US-n`) e critérios de aceite numerados (`AC-n`), com cada AC anotando a história que realiza** (`AC-1 (US-1)`). Os ACs são a espinha de rastreabilidade que atravessa `design.md`, `task.md` (`ACs cobertos`) e `/close` (cobertura verificada); o mapa AC→história é o que permite ao `/tasks` derivar a história de cada task (e, em provider com `grouping`, materializar cada `US-n` como card). AC vago não fecha épico; AC sem história não existe — critério transversal entra na história mais afim.
 6. **Template §12.3 verbatim** (embutido abaixo). Os campos `Board-ID`, `Board-URL` e `Promovido em` ficam **sem preencher** — são do `/promote`. PRD em `proposals/` com `Board-ID` preenchido é bug de processo.
 7. **Este estágio NÃO toca o board.** Nenhum verbo canônico, nenhum `board-writer`. Os PRDs são idealização: podem ser abandonados sem custo; só o `/promote` compromete (README §7).
 8. **Fecha em commit canônico como ÚLTIMO ato:** `factory(propose): <projeto-ou-cliente> — N PRDs`. `git add` **nominal** — por path explícito, arquivo a arquivo; nunca `.` ou `-A`. Estágio que não commitou não aconteceu.
@@ -87,11 +87,17 @@ Template canônico (README §12.3):
 [Que problema resolve, para quem, qual o valor. Linguagem de negócio.]
 
 ## Histórias de usuário
-[Como <persona>, quero <ação>, para <benefício>.]
+
+### US-1 — <título curto da história>
+Como <persona>, quero <ação>, para <benefício>.
+
+### US-2 — <título curto da história>
+Como <persona>, quero <ação>, para <benefício>.
 
 ## Critérios de aceite
-- AC-1: [condição objetiva e verificável]
-- AC-2: [condição objetiva e verificável]
+- AC-1 (US-1): [condição objetiva e verificável]
+- AC-2 (US-1): [condição objetiva e verificável]
+- AC-3 (US-2): [condição objetiva e verificável]
 
 ## Fora de escopo
 [O que esta feature explicitamente não cobre.]
@@ -103,7 +109,8 @@ Regras de preenchimento:
 - `Data`: a data de hoje, `YYYY-MM-DD`.
 - `Discutido com`: quem participou da discussão (normalmente `PO`).
 - `Board-ID`, `Board-URL`, `Promovido em`: **copie as três linhas com os placeholders intactos**, incluindo as anotações `← preenchido por /promote`. Não preencha — é o `/promote` que grava o vínculo com o board.
-- **Critérios de aceite:** numerados sequencialmente a partir de `AC-1`, um por condição, cada um objetivo e verificável por alguém que não participou da discussão. Quantos a feature pedir — mas cada AC precisa ser testável; "funciona bem" não é AC.
+- **Histórias de usuário:** numeradas sequencialmente a partir de `US-1`, cada uma com heading `### US-n — <título curto>` e a frase `Como <persona>, quero <ação>, para <benefício>`. Uma história é um recorte de valor na visão do usuário; a maioria das features rende 1–4. Não invente história para "completar estrutura" — feature de história única é legítima.
+- **Critérios de aceite:** numerados sequencialmente a partir de `AC-1` (numeração **global**, não por história), um por condição, cada um objetivo e verificável por alguém que não participou da discussão — e **cada um anotando a história que realiza**: `- AC-n (US-m): <condição>`. Todo AC pertence a exatamente uma história; critério transversal entra na história mais afim. Quantos a feature pedir — mas cada AC precisa ser testável; "funciona bem" não é AC.
 - **Fora de escopo:** explícito e honesto — o que esta feature não cobre (e, quando útil, onde isso vive: outro PRD da leva, ou lugar nenhum).
 - Paths relativos à raiz do projeto, separador `/`, em qualquer referência cruzada.
 

@@ -125,12 +125,16 @@ ops:
       state: "{binding.state_ids.$stage}"
     returns: ok
 
+  ensure_group: { noop: true, returns: "$feature_id" } # grouping: none — sem nível intermediário; o verbo devolve a própria Feature e as tasks penduram direto nela
+
+  read_groups: { noop: true, returns: [] } # grouping: none — não há nível story a ler
+
   create_task:
     tool: save_issue # sem id = create, com parentId
     args:
       {
         team: "{binding.team_id}",
-        parentId: "$feature_id",
+        parentId: "$parent_id", # = o feature_id aqui: com grouping none, ensure_group devolve a própria Feature
         title: "$title",
         description: "$body",
       }
@@ -196,6 +200,7 @@ ops:
 capabilities:
   hierarchy: native # Epic→Project; Feature→Issue
   tasks: native # sub-issue via parent no save_issue — arg confirmado pelo check de schema do resolve
+  grouping: none # sem nível intermediário de história — ensure_group é no-op (devolve feature_id); as US-n do PRD viajam na descrição da Issue
   states: validate-only # MCP não cria workflow states → provisionamento manual 1x (conduzido pelo /setup via prerequisites:)
   labels: native # create_issue_label — o /setup provisiona o bug (create-if-missing)
   identity:

@@ -40,7 +40,12 @@ canônicos (`.claude/factory-process.md`) e os executa contra o provider ativo. 
 2. Execute os verbos **na ordem recebida**. Antes de QUALQUER verbo de criação
    (`create_epic`, `create_feature`, `create_task`), rode `find_by_key` com a
    `factory-key` correspondente: se existir, **recupere** o ID em vez de criar — a
-   re-execução é idempotente por construção (§7).
+   re-execução é idempotente por construção (§7). **`ensure_group` é find-or-create
+   por definição:** com capability `grouping: native`, rode o op `find_group` do
+   manifesto com a `group_key` (`<factory-key>#US-n`); achou → devolva o id existente,
+   não achou → crie pelo op `ensure_group`. Com `grouping: none` (ou capability
+   ausente), `ensure_group` é **no-op que devolve o próprio `feature_id`** — registre
+   como no-op no resultado e siga: os `create_task` seguintes usam esse id como pai.
 3. Aplique identidade e estágio EXATAMENTE como o manifesto declara
    (capabilities `identity` e `stage_label`) — nunca por convenção própria.
    Ao mover um Feature, atualize o marcador de estágio pelo mecanismo do
@@ -57,11 +62,14 @@ canônicos (`.claude/factory-process.md`) e os executa contra o provider ativo. 
    MESMO marcador, **não crie** — no-op no resultado. Comentário é trilha append-only:
    nunca edite, nunca delete; divergência de conteúdo em comentário existente é
    relatório, não reescrita.
-7. **Leituras seguem os ops de leitura do manifesto** (`read_board`, `read_tasks`,
-   `read_item`, `read_comments`) — **nunca improvise busca textual própria**: search
-   full-text é não-determinístico e fabrica falso negativo. Tasks vêm SEMPRE por
-   `read_tasks` (relação parent) — elas não carregam `factory-key`, e ausência numa
-   leitura filtrada por key não significa ausência no board.
+7. **Leituras seguem os ops de leitura do manifesto** (`read_board`, `read_groups`,
+   `read_tasks`, `read_item`, `read_comments`) — **nunca improvise busca textual
+   própria**: search full-text é não-determinístico e fabrica falso negativo. Tasks vêm
+   SEMPRE por `read_tasks` (relação parent) — elas não carregam `factory-key`, e ausência
+   numa leitura filtrada por key não significa ausência no board. Com `grouping: native`,
+   o `read_tasks` do manifesto desce **dois níveis** (Feature → grupos → tasks) — um passo
+   `for_each` no manifesto é laço seu: itere os ids e una o resultado; com
+   `grouping: none`, `read_groups` devolve vazio e `read_tasks` é de um nível.
 
 ## Falha
 

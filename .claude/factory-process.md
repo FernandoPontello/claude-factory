@@ -16,6 +16,8 @@ working tree suja, por construção.
 ```
 epic     agrupa (o épico/promoção; aberto/fechado)
 feature  transita (uma por PRD/design — é o que percorre os estados)
+story    agrupa tasks por história de usuário do PRD — nível OPCIONAL (capability grouping);
+         só existe onde o provider tem nível intermediário nativo (ex: ADO User Story)
 task     granula progresso ("8 de 12") sem poluir o board
 ```
 
@@ -30,7 +32,7 @@ ready → design → in_progress → review → done → closed
 | `/promote` | `ready` | entrada (deliberado) |
 | `/bug` | `ready` (tag `bug`) | entrada (defeito é trabalho aceito) |
 | `/design` conclui | `design` | → automático |
-| `/tasks` | (cria Tasks) | Feature não move |
+| `/tasks` | (cria Stories + Tasks) | Feature não move |
 | `/code` 1ª task | `in_progress` | → automático |
 | todas as tasks done | `review` | → automático |
 | `/close` limpo | `done` | → automático |
@@ -49,14 +51,16 @@ create_epic(title, key, body?) → epic_id      # key = identidade; body = artef
 create_feature(epic_id, title, key, body?) → feature_id
 find_by_key(key) → feature_id | nulo          # identidade ANTES de criação — sempre
 move_feature(feature_id, stage)
-create_task(feature_id, title, body?) → task_id
+ensure_group(feature_id, group_key, title, body?) → group_id   # find-or-create do nível intermediário (capability grouping); grouping:none → no-op, retorna feature_id
+create_task(parent_id, title, body?) → task_id                 # parent_id = group_id quando há grouping; senão o feature_id
 complete_task(task_id, minutes?, note?)       # note = aprendizado da implementação
 comment_feature(feature_id, body)             # trilha do ciclo no card
 update_body(item_id, body, key?)              # re-projeta a descrição (key: providers com identidade na descrição)
 link_related(feature_id, feature_id)
 tag_feature(feature_id, tag)                  # tags semânticas (ex: bug)
-read_board(filtro) → estado                   # Epics e Features (itens COM factory-key)
-read_tasks(feature_id) → tasks                # tasks vêm por RELAÇÃO PARENT — nunca por filtro de key
+read_board(filtro) → estado                   # SÓ Epics e Features — key com "#" é grupo/Story e NÃO entra aqui (o manifesto filtra; leitor ignora "#" por defesa)
+read_groups(feature_id) → groups              # nível intermediário (grouping:native); grouping:none → vazio
+read_tasks(feature_id) → tasks                # tasks por RELAÇÃO PARENT — nunca por filtro de key; com grouping, a leitura desce Feature→Story→Task
 wiki_publish_page(root, slug, content)        # create-or-update, NUNCA delete
 wiki_read_index(root) → índice
 ```
@@ -64,9 +68,9 @@ wiki_read_index(root) → índice
 ## Projeção de conteúdo
 
 **Descrição = o que o card é.** Nasce com ele, vem do artefato de nascimento e viaja no
-`body` do verbo de criação: o `prd.md` integral na Feature (`/promote`, `/bug`), o
-`task.md` integral na Task (`/tasks`), a entrada do `pending.md` **verbatim** na Feature
-irmã (`/close`). **Comentários = a trilha do ciclo**, via `comment_feature`: o `design.md`
+`body` do verbo de criação: o `prd.md` integral na Feature (`/promote`, `/bug`), a seção da
+história `US-n` do PRD na Story (`/tasks`, quando há grouping), o `task.md` integral na Task
+(`/tasks`), a entrada do `pending.md` **verbatim** na Feature irmã (`/close`). **Comentários = a trilha do ciclo**, via `comment_feature`: o `design.md`
 ao concluir o `/design`, o `closure-notes.md` no `/close`; e `complete_task(note)` registra
 por task o aprendizado da implementação — o mesmo material do corpo do commit.
 
@@ -92,8 +96,10 @@ trilha. Da mesma forma, `update_body` com conteúdo idêntico ao atual é **no-o
 board-writer compara antes de escrever.
 
 **Obrigatórios** (o provider precisa realizar): criar itens, transitar estados, alguma forma
-de agrupamento. **Opcionais com fallback declarado** no manifesto: tasks filhas, tempo,
-tags, related. A degradação é impressa pelo `/setup` e aceita pelo operador.
+de agrupamento (epic). **Opcionais com fallback declarado** no manifesto: tasks filhas,
+**agrupamento intermediário de tasks por história (grouping)**, tempo, tags, related. A
+degradação é impressa pelo `/setup` e aceita pelo operador. Sem `grouping`, as tasks penduram
+direto na Feature (o `ensure_group` é no-op e devolve o `feature_id`).
 
 `find_by_key` precede **qualquer** criação: re-execução recupera o item existente em vez
 de duplicar. É o que torna `/promote`, `/bug` e `/sync` idempotentes.
@@ -110,8 +116,12 @@ de duplicar. É o que torna `/promote`, `/bug` e `/sync` idempotentes.
   admin): ali a coluna degrada e o round-trip precisa do marcador. Provider com os 6
   estados exatos e validados declara `stage_label: none` — o estado nativo É o contrato,
   o `/sync` deriva dele, e nenhum marcador redundante polui o card.
-- **Tasks não carregam `factory-key` própria** — a identidade delas é o par (Feature pai,
-  título `NNN — <título>`). Consequência epistêmica que vale para qualquer leitor:
+- **A Story (grouping) carrega identidade derivada** — `factory-key:<slug>#US-n` — para o
+  `ensure_group` recuperar em vez de duplicar em re-run. É o único nível intermediário com
+  key própria; existe só onde `grouping: native`.
+- **Tasks não carregam `factory-key` própria** — a identidade delas é o par (pai imediato —
+  a Story quando há grouping, senão a Feature —, título `NNN — <título>`). Consequência
+  epistêmica que vale para qualquer leitor:
   **leitura de tasks é sempre por relação parent (`read_tasks`), nunca por filtro de
   key** — uma leitura filtrada por key estruturalmente não as enxerga, e **ausência numa
   leitura filtrada não é evidência de ausência no board**. "Ausência é sinal" vale para
@@ -140,8 +150,10 @@ filesystem é re-rodar o estágio idempotente que o escreve.
 
 **O `/sync` reconcilia a projeção inteira — estados E conteúdo.** Além de realinhar
 estados, ele re-projeta a descrição de cada card casado a partir do artefato atual
-(`update_body`, no-op quando idêntico) e garante a trilha de comentários derivável de
-`docs/**` (`comment_feature` ensure-por-marcador: `[factory:design]` se `design.md`
+(`update_body`, no-op quando idêntico — a Feature espelha o `prd.md`, o grupo/história
+espelha a seção `US-n` do PRD, a task espelha o `task.md`), garante os grupos de história
+onde `grouping: native` (`ensure_group`, find-or-create) e garante a trilha de comentários
+derivável de `docs/**` (`comment_feature` ensure-por-marcador: `[factory:design]` se `design.md`
 existe, `[factory:closure]` se `closure-notes.md` existe, `⏱ factory:` do `## Tempo` de
 task concluída). A nota de implementação (`[factory:note]`) nasce no `/code` e não é
 reconstruída pelo `/sync` — a fonte dela é o corpo do commit, não `docs/**`.
