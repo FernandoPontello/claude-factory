@@ -2,7 +2,9 @@
 name: close
 description: Fecho o épico — gates de qualidade rodando o app de verdade, reconcilio os overviews, registro pendências e closure-notes, publico a wiki e levo a Feature a done.
 argument-hint: "<épico-slug>"
-disable-model-invocation: true
+# disable-model-invocation removido (README §17): a invariante 9 deste estágio passou a ser
+# garantida pelo guard-autopilot, que exige sentinela de run ativa. Sem run, invocação pelo
+# modelo é negada — o default continua sendo gate humano.
 allowed-tools: Bash(git add *) Bash(git commit *)
 hooks:
   PreToolUse:
@@ -100,8 +102,13 @@ O `verifier` opera pela receita `.claude/build-run.md`, gravada pelo `/setup`. S
 este `/close` a gera agora. Spawne o `verifier` para descobrir, **executando por
 evidência**, como buildar, testar e rodar o app; com o retrato dele em mãos, **esta
 sessão grava o arquivo** — `.claude/build-run.md` está no write-set do estágio.
-**GATE:** o operador valida a receita antes de ela ser usada. Commit imediato e nominal:
-`factory(close): <slug> — receita de build/run gerada`.
+**GATE (sessão interativa):** o operador valida a receita antes de ela ser usada. Commit
+imediato e nominal: `factory(close): <slug> — receita de build/run gerada`.
+
+**Em run de `/autopilot`:** grave só o que o `verifier` **verificou executando** e anote na
+própria receita o que ficou por confirmar — mesma degradação do `/setup --non-interactive`.
+Receita é insumo de todo `/close` futuro: inventar comando aqui envenena a verificação de
+todos os épicos seguintes.
 
 ### O verifier builda e RODA o app de verdade
 
@@ -135,13 +142,24 @@ opt-in deliberado do operador para o épico grande; o caso comum é dispensá-lo
 ### GATE de achados
 
 Consolide tudo — verifier, revisores, time se houver — numa lista única com severidade e
-evidência. **GATE:** o operador decide o que entra antes de qualquer escrita. Cada achado
-tem três destinos possíveis:
+evidência. **GATE (sessão interativa):** o operador decide o que entra antes de qualquer
+escrita. Cada achado tem três destinos possíveis:
 
 - **Vira pendência** (ato 3) — débito aceito, visível no board desde já.
 - **Descartado** — falso positivo ou irrelevante; registre a decisão nas closure-notes.
 - **Bloqueia o fechamento** — o operador re-roda `/code` em sessão própria; este `/close`
   para aqui e é re-invocado depois (a re-execução é recuperação, não recriação).
+
+**Em run de `/autopilot`** você mesmo destina cada achado, pelo critério declarado, e
+**registra nas closure-notes o destino E o porquê de cada descarte** — descarte sem
+justificativa é o único jeito de este modo apagar um achado real, então ele é proibido.
+Critério padrão: achado com evidência verificada e caminho de produção alcançável vira
+pendência; achado sem evidência reproduzível é descartado com o motivo; achado que invalida
+um AC entregue **bloqueia**.
+
+Bloqueio não abandona o estágio aqui: o orquestrador re-invoca `/code` para o achado, confirma
+o commit e retoma este `/close`. Você não invoca nada — reporte o bloqueio e a task alvo, e
+devolva ao orquestrador (README §17).
 
 ## Ato 2 — Reconciliação dos overviews (não append)
 
@@ -159,9 +177,18 @@ existente não altera o architecture-overview — o padrão já está lá. Bug f
 não alteram o product-overview — a superfície é a mesma.
 
 Proponha o **diff exato** (ou a ausência dele, com a justificativa: "nada mudou de
-invariante nem de capacidade"). **GATE:** o operador confirma o diff (ou a ausência)
-antes de qualquer escrita nos overviews. Confirmação leve — mas é ela que mantém o
+invariante nem de capacidade"). **GATE (sessão interativa):** o operador confirma o diff (ou
+a ausência) antes de qualquer escrita nos overviews. Confirmação leve — mas é ela que mantém o
 operador dono da fonte de verdade.
+
+**Em run de `/autopilot`** este é o gate mais delicado do modo, porque os overviews são a
+régua contra a qual o `/design` desenha, e o run desenha. Por isso o viés aqui é **não tocar**:
+o default já é a ausência de diff (§8), e no modo ele é ainda mais forte. Escreva num overview
+somente com o gatilho declarado — invariante de arquitetura mudou, ou capacidade de produto
+entrou/saiu — e **registre nas closure-notes o diff aplicado e o gatilho que o justificou**.
+Na dúvida, não toque e registre a dúvida: overview reescrito por engano contamina todo épico
+seguinte, e é a única mudança deste modo que o operador não consegue detectar lendo um commit
+de código (README §17).
 
 ## Ato 3 — Pendências (§9, §12.6)
 
@@ -250,7 +277,11 @@ Preenchimento sem improviso:
 - **Impacto nos overviews** e **Wiki**: o resultado dos atos 2 e 4 — inclusive os
   negativos ("nada mudou", "nenhuma página").
 
-**GATE:** o operador valida closure-notes (e o `pending.md`, se houver) antes do commit.
+**GATE (sessão interativa):** o operador valida closure-notes (e o `pending.md`, se houver)
+antes do commit. **Em run de `/autopilot`** o prompt-based hook do `Stop` deste estágio é o
+avaliador: ele bloqueia se algum `AC-n` do PRD ficar sem veredito. Some-se a isso a obrigação
+do modo — destino de cada achado, porquê de cada descarte, e o diff de overview com seu
+gatilho, todos registrados aqui. As closure-notes são o relatório de auditoria do run.
 
 ### Wiki
 

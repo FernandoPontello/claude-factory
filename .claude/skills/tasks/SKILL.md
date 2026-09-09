@@ -2,7 +2,9 @@
 name: tasks
 description: Decomponho o design do épico em tasks — grafo de dependências, write-set e ACs cobertos — o contrato que o /code executa.
 argument-hint: "<épico-slug>"
-disable-model-invocation: true
+# disable-model-invocation removido (README §17): a invariante 9 deste estágio passou a ser
+# garantida pelo guard-autopilot, que exige sentinela de run ativa. Sem run, invocação pelo
+# modelo é negada — o default continua sendo gate humano.
 allowed-tools: Bash(git add *) Bash(git commit *)
 hooks:
   PreToolUse:
@@ -14,6 +16,8 @@ hooks:
     - hooks:
         - type: command
           command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-scan.ps1" -Stage tasks
+        - type: prompt
+          prompt: "FAST-PATH: se nenhum arquivo em docs/epics/*/tasks/ foi escrito nesta sessão, aprove IMEDIATAMENTE, sem análise nem justificativa. Caso contrário, verifique TRÊS coisas: (1) toda task declara os três eixos — 'Depende de', 'Toca' e 'ACs cobertos' — nenhum vazio por omissão (vazio explícito em 'Depende de' é legítimo e significa ordem livre); (2) todo AC-n do prd.md está coberto por ao menos uma task, ou marcado como AC descoberto; (3) o grafo de 'Depende de' é acíclico. Ciclo é decomposição errada, não registro: bloqueie. Se algo falta, bloqueie e aponte a task e o eixo exatos."
 ---
 
 # /tasks — decomposição e grafo
@@ -25,7 +29,8 @@ Estágio Dev. Consome `design.md` + `prd.md` do épico e os decompõe em N tasks
 
 1. **A Lei da Factory.** Você propõe a decomposição, interroga granularidade, ordem e riscos,
    expõe trade-offs — e **devolve a decisão ao operador**. Nenhum arquivo de task é escrito
-   antes do gate.
+   antes do gate. *Em run de `/autopilot`* a decisão foi pré-delegada no início do run: decida
+   pelo critério declarado e registre no `task.md`; sem registro, é a Lei quebrada (README §17).
 2. **Write-set deste estágio:** apenas `docs/epics/<slug>/tasks/NNN-<slug>.md`. Não toque
    `design.md`, `prd.md`, código ou qualquer outro path — os hooks bloqueiam, e a tentativa
    já é o erro.
@@ -166,9 +171,16 @@ Apresente, em conversa (nada escrito ainda):
 - **decisões de história pendentes**, em destaque: tasks cross-história (dividir ou escolher a
   dona?) e tasks sem história derivável (herdar de qual?). A escolha é do operador.
 
-**GATE: o operador valida a decomposição antes de qualquer arquivo ser escrito.** Ajuste e
-re-apresente quantas vezes ele pedir. A decomposição aprovada é a que vai para o disco —
-sem "melhorias" silenciosas depois do aceite.
+**GATE (sessão interativa): o operador valida a decomposição antes de qualquer arquivo ser
+escrito.** Ajuste e re-apresente quantas vezes ele pedir. A decomposição aprovada é a que vai
+para o disco — sem "melhorias" silenciosas depois do aceite.
+
+**Em run de `/autopilot`** não há operador no loop. Decida granularidade, ordem e dono de
+história pelo critério declarado e **registre no `task.md` afetado** o que decidiu e o que
+ficou de fora — em especial as três escolhas que este gate normalmente devolve: task
+cross-história, task sem AC derivável, e granularidade discutível. O gate não some: o
+prompt-based hook do `Stop` cobra os três eixos em toda task, cobertura de todo AC do PRD e
+grafo acíclico. Ciclo continua sendo decomposição errada — corrija, não registre (README §17).
 
 ## Escrita dos arquivos
 

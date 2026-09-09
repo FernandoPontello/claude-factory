@@ -1,7 +1,9 @@
 ---
 name: sync
 description: Realinho o board ao estado real do filesystem — fetch, derivo pelo contrato, comparo e reprojeto. Nunca escrevo filesystem.
-disable-model-invocation: true
+# disable-model-invocation removido (README §17): a invariante 9 deste estágio passou a ser
+# garantida pelo guard-autopilot, que exige sentinela de run ativa. Sem run, invocação pelo
+# modelo é negada — o default continua sendo gate humano.
 allowed-tools: Bash(git fetch *)
 hooks:
   PreToolUse:

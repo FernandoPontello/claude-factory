@@ -428,12 +428,20 @@ mantém o `git status` limpo para o operador.
 
 **5e. Registro de hooks de projeto — `.claude/settings.json`.** É deste arquivo que a
 plataforma carrega os hooks de projeto — registro em qualquer outro lugar é guard inerte,
-exatamente o que o canário (passo 6) acusa. Grave a chave `"hooks"` com os três
+exatamente o que o canário (passo 6) acusa. Grave a chave `"hooks"` com os quatro
 registros, na variante de SO do passo 1:
 
 - `guard-git` em `PreToolUse` (matcher `Bash`);
 - `gate-stage` em `UserPromptExpansion`;
+- **`guard-autopilot` e `gate-stage -FromSkill` em `PreToolUse` (matcher `Skill`)** — nesta
+  ordem, ambos no mesmo matcher (README §17);
 - `inject-invariants` em `SessionStart` (matcher `compact`).
+
+Os dois do matcher `Skill` são **obrigatórios, não opcionais**: os cinco estágios
+orquestráveis não carregam mais `disable-model-invocation`, então sem eles a factory nasce
+com invocação-pelo-modelo livre e sem pré-condição. É o único par de registros cuja ausência
+**afrouxa** um invariante em vez de só deixar um guard inerte — e por isso o canário tem
+sondas próprias para ele (E e F, passo 6).
 
 O merge é **não-destrutivo**: a chave `hooks` pertence a este estágio
 (criada/atualizada); **qualquer outra chave existente no arquivo pertence ao operador e é
@@ -462,6 +470,8 @@ Sondas (todas inofensivas *mesmo se passassem* — defesa em profundidade na pr�
 | B | sessão | `Write` em `docs/factory-canary.md` (fora do write-set do setup) | `guard-writes` (frontmatter desta skill) |
 | C | sub-agent | escrita no board com tree suja: crie `.claude/hooks/.canary` (dentro do write-set — sujeira legítima), spawne o board-writer com lote `[read_board]` | `board-gate` (frontmatter do board-writer) → saída `blocked` |
 | D | sub-agent | **garantia em camadas — três afirmações**: D1 `git merge --abort` num sub-agent genérico; D2 frontmatter de agent (referencia o resultado de C); D3 o sub-agent escreve um arquivo-canário fora de qualquer write-set e a checagem do `stop-scan` deve **acusá-lo** como sujeira | D1: `guard-git` propagado do registro de projeto (`.claude/settings.json`); D2: `board-gate` no frontmatter do board-writer (via C); D3: `stop-scan` — sub-agent genérico não carrega frontmatter, logo não tem guard de escrita in-flight; a garantia real para ele é o scan do `Stop` + a fronteira do commit (§5) |
+| E | sessão | **a porta da autonomia — três afirmações.** Garanta que `.claude/.factory/autopilot/active.json` **não existe**. E1: invocação-pelo-modelo de `/design` deve ser **negada**. E2: invocação-pelo-modelo de `/autopilot` deve ser **negada** (nem com run ativo ele é invocável). E3: invocação de uma skill que **não** é estágio (ex.: `/code-review`) deve **passar** — guard que barra tudo não é guard, é quebra | `guard-autopilot` (registro de projeto, matcher `Skill`). E3 é a sonda de falso-positivo: sem ela, um guard que nega indiscriminadamente passaria por "funcionando" |
+| F | sessão | **pré-condição no caminho do modelo.** Com a tree suja fora do write-set de `design` (reuse o arquivo-canário de B antes da limpeza, ou crie um), a invocação-pelo-modelo de `/design` deve ser barrada **pela mensagem do `gate-stage`** — não pela do `guard-autopilot`. Distinguir a origem é o ponto: é o que prova que o `-FromSkill` está registrado e não apenas que algo negou | `gate-stage -FromSkill` (registro de projeto, matcher `Skill`). Se a mensagem vier do `guard-autopilot`, o `-FromSkill` está ausente ou inerte: **reprovado**, e a factory rodaria estágio autônomo sem validar tree, `requires` nem frescor de `docs/**` |
 
 Protocolo:
 

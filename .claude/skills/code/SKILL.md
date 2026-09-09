@@ -2,7 +2,9 @@
 name: code
 description: Executo as tasks do épico — batch topológico em sessão única (default), uma task específica, ou paralelo via workflow — um commit por task, board só depois da verdade commitada.
 argument-hint: "[task-id] [--parallel]"
-disable-model-invocation: true
+# disable-model-invocation removido (README §17): a invariante 9 deste estágio passou a ser
+# garantida pelo guard-autopilot, que exige sentinela de run ativa. Sem run, invocação pelo
+# modelo é negada — o default continua sendo gate humano.
 allowed-tools: Bash(git add *) Bash(git commit *)
 hooks:
   PreToolUse:
@@ -14,6 +16,8 @@ hooks:
     - hooks:
         - type: command
           command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-toca.ps1"
+        - type: prompt
+          prompt: "FAST-PATH: se nenhuma task mudou de Status para 'concluída' nesta sessão, aprove IMEDIATAMENTE, sem análise nem justificativa. Caso contrário, para CADA task marcada concluída: o 'Critério de pronto' dela foi verificado com evidência observada (comando rodado, teste passando, saída conferida), ou apenas presumido a partir do código escrito? Presumir não conta — ausência de evidência nunca vira sucesso. Verifique também que cada uma tem '## Tempo' preenchido com relógio real e um commit canônico correspondente. Se alguma foi marcada concluída sem evidência, bloqueie e nomeie a task e o critério não verificado."
 ---
 
 # /code — execução
@@ -27,7 +31,10 @@ sessão `<épico>/code` (ex: `checkout/code`).
 
 1. **O `task.md` inteiro é o contrato.** Implemente o que ele manda — Objetivo, Contexto,
    Critério de pronto. Decisão que o design não cobre não se improvisa: pare, exponha
-   opções e trade-offs e **devolva ao operador** (a Lei da Factory).
+   opções e trade-offs e **devolva ao operador** (a Lei da Factory). *Em run de `/autopilot`*
+   não há operador no loop: decida pelo critério declarado e escreva **no corpo do commit**
+   quais eram as opções e por que esta — o corpo já é onde o aprendizado viaja (regra 2), e
+   aqui ele também é a auditoria. Não improvise em silêncio; não pare (README §17).
 2. **Um commit por task, como fecho daquela task**, mensagem canônica:
    `factory(code): <slug> — task NNN <resumo>`. O **corpo** do commit carrega o aprendizado
    cross-task. `git add` **nominal** — por path explícito (os paths do `Toca` + o próprio
@@ -55,7 +62,9 @@ sessão `<épico>/code` (ex: `checkout/code`).
 9. **Workers de paralelismo nunca falam com o board** — só esta sessão principal emite
    verbos, derivados do filesystem após a integração.
 10. **Estágios não invocam estágios.** Ao terminar, devolva ao operador — o próximo passo
-    (`/close`, ou re-rodar uma task) é dele.
+    (`/close`, ou re-rodar uma task) é dele. *Exceção:* dentro de um run de `/autopilot` quem
+    encadeia é o orquestrador, e você continua não invocando nada — devolve a ele o mesmo
+    resumo que devolveria ao operador (README §17).
 
 Sessões de batch compactam: estas regras vivem no topo por isso (os primeiros ~5.000
 tokens são preservados), e o hook `SessionStart(compact)` reinjeta
@@ -115,7 +124,10 @@ o batch marca cada task como done **após o commit daquela task** — a exceçã
 "escreve-só-ao-concluir-o-estágio" (factory-process.md).
 
 Ao final: resumo (concluídas, falhas por ramo, resíduos anotados, tempo total).
-**GATE:** o operador valida o resumo do batch antes de seguir para o `/close`.
+**GATE (sessão interativa):** o operador valida o resumo do batch antes de seguir para o
+`/close`. **Em run de `/autopilot`:** entregue o mesmo resumo ao orquestrador e deixe o
+`/close` para ele — task que falhou continua `pendente`, e o run a estaciona com a evidência
+em vez de fechá-la (README §17).
 
 ## Modo individual (`/code 003`)
 
@@ -277,9 +289,13 @@ tasks concluídas (com duração), falhas e causas, resíduos anotados (números
 estado do Feature no board (ou pendência de `/sync`), e o aprendizado que vale levar ao
 `/close`.
 
-**GATE:** o operador valida o resultado antes de qualquer próximo passo — `/close` quando
-o épico está pronto para os gates de qualidade, ou `/code NNN` para re-trabalhar. Você
-sugere; ele decide e digita.
+**GATE (sessão interativa):** o operador valida o resultado antes de qualquer próximo passo —
+`/close` quando o épico está pronto para os gates de qualidade, ou `/code NNN` para
+re-trabalhar. Você sugere; ele decide e digita.
+
+**Em run de `/autopilot`:** o orquestrador decide o próximo passo pelo estado do filesystem —
+você reporta e ele encadeia. O que não muda em modo algum: **nunca pushe** (regra 8), e nunca
+marque `concluída` o que não passou no `Critério de pronto` (README §17).
 
 ## Referências
 

@@ -41,9 +41,11 @@ Esta é a regra que dá coerência a todos os estágios de discussão da factory
 
 Quando um estágio novo for criado, esta lei diz como ele deve se comportar: receber proposta, amadurecer por trade-offs, devolver a decisão. A factory não inventa o produto, não escolhe a arquitetura, não decide o que vira trabalho — ela estrutura, questiona e formaliza as decisões que o operador leva.
 
+**A cláusula do autopilot (§17).** Há um modo em que a decisão não é devolvida em conversa: o operador a **pré-delega** ao iniciar um run de `/autopilot`, e cada estágio registra no próprio artefato o que decidiu e qual alternativa descartou. A Lei continua valendo, e é importante ver por quê: o operador não deixou de decidir — ele decidiu **antes e por classe**, em vez de item a item, e o ato de iniciar o run *é* a decisão. O que muda é o instante e a granularidade, não o dono. O que a factory nunca faz, em modo algum, é decidir sem registrar: decisão sem rastro seria a Lei quebrada, não flexibilizada. Fora de um run ativo o gate humano é o default, e o `guard-autopilot` o torna físico.
+
 ### Princípios fundadores
 
-**Gate humano entre estágios.** Cada estágio produz um artefato e para. O operador valida antes de seguir. A factory acelera ao redor da decisão, não a decisão em si — que é a Lei acima, aplicada à transição entre estágios.
+**Gate humano entre estágios.** Cada estágio produz um artefato e para. O operador valida antes de seguir. A factory acelera ao redor da decisão, não a decisão em si — que é a Lei acima, aplicada à transição entre estágios. *Ressalva de modo:* dentro de um run de `/autopilot` o gate não some — troca de avaliador, de humano para critério declarado em prompt-based hook no `Stop` (§17). Fora do run, este princípio vale integralmente e é o default.
 
 **Single-writer.** Cada artefato tem um único estágio que escreve nele. Isso evita disputa de escrita e mantém a origem de cada arquivo rastreável (§14).
 
@@ -93,7 +95,7 @@ O perfil do PO restringe escrita a `docs/proposals/**` (com as exceções operad
 Três regras dão nome a tudo na factory:
 
 1. **Teste de fala.** O comando é o que o operador diria em voz alta na hora de usar ("vou *propor* as features", "vou *desenhar* a solução", "vou *fechar* o épico"). Verbo quando natural; substantivo quando é assim que a pessoa procuraria (`/bug`).
-2. **Colisão zero com a plataforma.** Ficam reservados — e proibidos para estágios da factory — os nomes que o Claude Code ocupa: `/run`, `/verify`, `/review`, `/code-review`, `/security-review`, `/debug`, `/batch`, `/loop`, `/init`, `/goal`, `/fork`. No plugin tudo ganha o namespace `claude-factory:`, mas instalado no projeto os nomes são crus — melhor nascer sem conflito.
+2. **Colisão zero com a plataforma.** Ficam reservados — e proibidos para estágios da factory — os nomes que o Claude Code ocupa: `/run`, `/verify`, `/review`, `/code-review`, `/security-review`, `/debug`, `/batch`, `/loop`, `/init`, `/goal`, `/fork`. No plugin tudo ganha o namespace `claude-factory:`, mas instalado no projeto os nomes são crus — melhor nascer sem conflito. É por esta regra que o orquestrador se chama `/autopilot`: `/run`, `/batch` e `/loop`, os três nomes que o descreveriam melhor, são justamente os ocupados.
 3. **Papel não vai no nome.** Enforcement de papel é perfil (§2), o que permite a um comando mudar de dono — ou não ter dono — sem mudar de nome.
 
 Os comandos são em inglês por decisão deliberada: eles convivem com o vocabulário bundled da plataforma (uma CLI bilíngue confunde), e o nome do diretório da skill *é* o comando — acento vira dívida. O português fica onde sempre esteve: na prosa dos templates e na conversa.
@@ -829,7 +831,8 @@ A prosa das skills descreve a intenção; a plataforma garante o invariante. O m
 
 | Invariante | Mecanismo |
 |---|---|
-| Gate humano / estágios não invocam estágios | `disable-model-invocation: true` no frontmatter de toda skill de estágio — só o operador digita comandos de estágio |
+| Gate humano / estágios não invocam estágios | `disable-model-invocation: true` no frontmatter de toda skill de estágio — só o operador digita comandos de estágio. **Exceção dos 5 orquestráveis** (`design`, `tasks`, `code`, `close`, `sync`): perderam a flag, e o invariante passou a ser garantido pelo `guard-autopilot` em `PreToolUse(Skill)`, que exige sentinela de run ativa **e** o estágio dentro de `stages.autopilot.orchestrates` ∩ escopo do run (§17). O `/autopilot` mantém a flag: iniciar um run é sempre ato do operador |
+| Pré-condições no caminho de invocação-pelo-modelo | `gate-stage.ps1 -FromSkill` em `PreToolUse(Skill)`: sem ele, o estágio invocado pelo modelo rodaria sem tree limpa, sem `requires` e sem frescor de `docs/**` — o `UserPromptExpansion` só existe quando há prompt digitado (§17) |
 | Pré-condições de estágio (tree limpa ou suja só no próprio write-set; artefato anterior existe; `docs/**` não-*behind* do origin, §5) | Hook `UserPromptExpansion` — valida (com `git fetch`) e **bloqueia a expansão do comando antes do modelo ver o prompt**; *behind* confirmado bloqueia e instrui o ff-only, fetch falho avisa e segue (§5) |
 | Single-writer durante o estágio | Hook `PreToolUse` em `Edit\|Write` validando o path contra o domínio do estágio **+** scan no `Stop` via `git status --porcelain` — a dupla cobre a brecha de escrita via Bash |
 | Write-set da task (`Toca`) | Hook no `Stop` do `/code` compara o diff real contra o declarado (§10) |
@@ -886,6 +889,14 @@ Enforcement não é uma lista; é uma matriz. Há quatro contextos de execução
 
 **`/design` pulado (PRD direto para `/tasks`).** O design técnico é onde a estratégia de implementação é decidida com o operador no loop. Pular leva o `/tasks` a improvisar arquitetura.
 
+**Estágio executado "na mão" para pular o gate.** Rodar o trabalho de um estágio fora dele — editando o artefato direto, sem o estágio, sem o commit canônico — é o gate contornado sem ficar registrado. O caminho sancionado para execução sem gate por item é um run de `/autopilot` (§17), que é ato do operador e deixa rastro; edição por fora não é.
+
+**`/autopilot` usado para pré-delegar decisão de produto.** O run pré-delega decisão *técnica* dentro de um design já comprometido. Ele não promove, não abre bug e não re-fundamenta overviews — a faixa PO e o `/ground` estão fora do teto de orquestração por desenho. Ampliar o teto para escapar do gate de promoção é o julgamento de valor saindo de fininho: "decidir o que vira trabalho é deliberado, nunca automático" (§7).
+
+**Decisão tomada em modo autopilot sem registro no artefato.** A Lei sobrevive ao autopilot porque a decisão fica escrita onde foi tomada — alternativa descartada no `design.md`, aprendizado no corpo do commit, achado e destino no `closure-notes.md`. Decidir sem registrar não é a Lei flexibilizada; é a Lei quebrada, e sem o rastro o operador perde a única auditoria que lhe resta.
+
+**Run de autopilot sem regra de convergência.** `/close` gera pendência → re-entra → `/close` gera pendência: sem teto de profundidade de derivação, a fábrica fabrica dívida indefinidamente e o run nunca termina. Item derivado além do teto é estacionado no relatório, não re-entrado (§17).
+
 **`/ground` em projeto com código no modo destila.** Bootstrap destila drafts; em codebase existente, ele scaneia. Rodar o modo errado produz overviews pobres.
 
 **Estágio movendo card sem ter concluído (e commitado).** O board-writer escreve fatos consumados. Mover ao iniciar faz o board mentir sobre progresso.
@@ -901,6 +912,106 @@ Enforcement não é uma lista; é uma matriz. Há quatro contextos de execução
 **Construir antes do trigger.** Tipos de pendência, capacidade nova, manifesto de provider que ninguém usa — a factory é destilação, não construção.
 
 ---
+
+## 17. Modo autopilot
+
+O gate humano entre estágios é o default da factory e continua sendo. Mas há um caso em que ele
+é o gargalo e não a proteção: **fila grande de trabalho já comprometido**, onde o operador já
+decidiu *que* aquilo será feito e o que sobra é decisão técnica dentro de um design. Uma fila de
+16 pendências custa ~64 invocações manuais; o julgamento por item é pequeno, e o custo de
+digitá-lo, não.
+
+O `/autopilot` é o orquestrador desse caso: **o único estágio que invoca estágios.**
+
+### O que muda, e o que não
+
+A Lei não é suspensa — a decisão é **pré-delegada**. O operador decide antes e por classe, ao
+iniciar o run, em vez de item a item; e cada estágio grava no próprio artefato o que decidiu e
+qual alternativa descartou. Muda o instante e a granularidade da decisão, não o dono dela.
+
+O gate também não desaparece: **troca de avaliador.** Onde havia "o operador valida antes do
+commit", passa a haver um prompt-based hook no `Stop` avaliando o critério do próprio estágio —
+o mecanismo que o `/close` já usava sozinho (§15), agora em `design`, `tasks` e `code` também.
+Um gate que pergunta "todo `AC-n` está coberto?" não precisa de humano para ser um gate.
+
+### Escopo, e por que ele para onde para
+
+Orquestráveis: **`design`, `tasks`, `code`, `close`, `sync`** — declarados em
+`stages.autopilot.orchestrates` no `stage-map.json`.
+
+Fora, por desenho:
+
+- **Faixa PO** (`/vision`, `/propose`, `/promote`, `/bug`). Promoção é julgamento de valor, e
+  pusha para o trunk — o destinatário é outra máquina e outro papel (§7).
+- **`/ground`.** Roda uma vez na vida do projeto (§3); a manutenção dos overviews já é do
+  `/close`. Incluí-lo só habilitaria o run reescrever os invariantes de arquitetura contra os
+  quais ele desenha — a régua e o medidor no mesmo processo.
+- **`/code --parallel`.** O `coder` tem contrato oposto (abaixo). Sequencial no run.
+- **O próprio `/autopilot`.** Mantém `disable-model-invocation: true`: iniciar um run é sempre
+  ato do operador, porque é ali que ele pré-delega. Estágio que se auto-inicia seria autonomia
+  se autoconcedendo.
+- **Push.** Continua ato deliberado do operador, em modo algum automático (§5). O run fecha em
+  commits locais: a superfície de auditoria é o histórico, e nada sai da máquina sem o operador.
+
+### O mecanismo: duas chaves
+
+Um run ativo grava a sentinela `.claude/.factory/autopilot/active.json`. O `guard-autopilot`
+(`PreToolUse(Skill)`, nível de projeto, propaga para sub-agents) autoriza a invocação-pelo-modelo
+só na **interseção** de duas listas:
+
+| Chave | Onde vive | O que é |
+|---|---|---|
+| Teto | `stages.autopilot.orchestrates` | contrato **versionado**: ampliar é mudança de factory, revisada e commitada |
+| Escopo | campo `stages` da sentinela | o que **este** run vai executar; pode ser mais estreito que o teto |
+
+Interseção e nunca união: a sentinela é arquivo de runtime, o stage-map é contrato. Sentinela
+forjada não amplia o que o stage-map não declarou. Sentinela **ilegível nega** — ela é o insumo
+que concede autonomia, e "na dúvida, mais prompts, nunca menos segurança" (§1) vale primeiro para
+ela. Por isso o `guard-autopilot` também é o único hook que **não** degrada para permissivo
+quando o `stage-map.json` está ilegível: ele cai numa lista de fallback, porque antes deste modo
+a flag de frontmatter era o backstop, e ela não está mais lá.
+
+E o `gate-stage` ganhou um segundo ponto de entrada (`-FromSkill`). Sem ele o modo nasceria sem
+pré-condição alguma: o `UserPromptExpansion` só existe quando há prompt digitado, então tree
+suja, artefato requerido faltando e `docs/**` vencido passariam calados na invocação pelo modelo
+— exatamente as guardas que o operador não percebe que tem.
+
+### Onde cada decisão fica registrada
+
+Nenhum artefato novo: a decisão fica no write-set do estágio que a tomou (§14).
+
+| Estágio | Registro |
+|---|---|
+| `design` | `design.md` — a seção de alternativas descartadas passa a **obrigatória** no modo |
+| `tasks` | os próprios `task.md` e a nota de grafo |
+| `code` | **corpo do commit** — já era a convenção do aprendizado cross-task |
+| `close` | `closure-notes.md` — achado, destino e o porquê do descarte |
+
+### Convergência
+
+O `/close` cria pendência como Feature irmã em `ready` sem passar pelo gate de promoção (§9), e
+o run re-entra o que surgiu da revisão — é assim que "executar o que a revisão gerar" funciona
+sem mecanismo novo. Mas isso fecha um laço: pendência gera pendência, indefinidamente.
+
+A sentinela carrega **profundidade de derivação** por item. Item com `depth` acima do teto
+(default 2) é **estacionado** no relatório do run, não re-entrado. Mais um teto de itens por run.
+Não é gate — é o que impede a fábrica de fabricar dívida infinita.
+
+Item que **falha a verificação** é estacionado com a evidência e o run segue para o próximo item
+independente. O que ele nunca faz é commitar como pronto o que não passou: "estágio que não
+commitou não aconteceu" (§5) tem o converso, e é este.
+
+### A divergência com o `coder`, declarada
+
+O `coder` (paralelismo, §10) tem a regra oposta e ela continua certa **lá**: sem operador no
+runtime, decisão não coberta pelo design faz a task **falhar** com `reason`, devolvendo a decisão
+pela única via que existe — a saída estruturada. É a Lei adaptada a um runtime que não aceita
+input no meio do run.
+
+O autopilot decide e registra. A diferença não é de rigor, é de **origem da autoridade**: o run
+foi iniciado pelo operador, que pré-delegou aquelas classes de decisão e escolheu o escopo; um
+workflow disparado de dentro de um estágio não tem essa pré-delegação. Onde não houve ato de
+pré-delegação, o contrato do `coder` prevalece — e é por isso que `--parallel` está fora do teto.
 
 ## Apêndice A — Execução de referência: projeto novo
 

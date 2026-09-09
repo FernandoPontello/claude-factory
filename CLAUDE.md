@@ -21,4 +21,6 @@ Pipeline de desenvolvimento assistido por IA: PO define o quê, Dev define o com
 | `docs/epics/<slug>/` | trabalho comprometido: prd, design, tasks, pending, closure-notes |
 | `docs/wiki/` | wiki repo-first (default) |
 
-Comandos de estágio são invocados **só pelo operador** (`disable-model-invocation`). Nunca invoque um estágio em nome do usuário.
+Comandos de estágio são invocados **só pelo operador**. Nunca invoque um estágio em nome do usuário: ao concluir, informe o próximo passo — não o execute.
+
+**Única exceção — modo autopilot (README §17).** `/design`, `/tasks`, `/code`, `/close` e `/sync` são invocáveis pelo modelo **enquanto existe um run ativo**, iniciado pelo operador, e só dentro do teto `stages.autopilot.orchestrates` ∩ escopo da sentinela. O `guard-autopilot` torna isso físico. O `/autopilot` em si mantém `disable-model-invocation`: iniciar um run é sempre ato do operador, porque é ali que ele pré-delega as decisões. Nesse modo, decisão tomada **tem de ficar registrada** no artefato do estágio — decidir sem rastro quebra a Lei, não a flexibiliza.

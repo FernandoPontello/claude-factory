@@ -2,7 +2,9 @@
 name: design
 description: Desenho a solução técnica de um PRD aceito — ou re-entro uma pendência — com trade-offs interrogados antes de eu decidir.
 argument-hint: "<épico-slug | épico-slug#pendência>"
-disable-model-invocation: true
+# disable-model-invocation removido (README §17): a invariante 9 deste estágio passou a ser
+# garantida pelo guard-autopilot, que exige sentinela de run ativa. Sem run, invocação pelo
+# modelo é negada — o default continua sendo gate humano.
 allowed-tools: Bash(git add *) Bash(git commit *)
 hooks:
   PreToolUse:
@@ -14,6 +16,8 @@ hooks:
     - hooks:
         - type: command
           command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-scan.ps1" -Stage design
+        - type: prompt
+          prompt: "FAST-PATH: se nenhum design.md foi escrito nesta sessão, aprove IMEDIATAMENTE, sem análise nem justificativa. Caso contrário, verifique DUAS coisas: (1) cada AC-n do prd.md do épico (ou da entrada de pending.md, na re-entrada) é realizado por alguma decisão do design, ou está explicitamente fora de escopo com justificativa; (2) o design registra as alternativas descartadas e o porquê — em run de autopilot esse registro é a única auditoria que resta ao operador, e sua ausência é bloqueio, não estilo. Se algo falta, bloqueie e aponte exatamente qual AC ou qual decisão está sem alternativa registrada."
 ---
 
 # /design — tradução técnica do PRD
@@ -26,7 +30,7 @@ Estágio Dev. Consome o `prd.md` aceito + os dois overviews e produz `docs/epics
 2. **Write-set único:** `docs/epics/*/design.md` — e nada mais (single-writer, README §14). Não toque `prd.md`, `pending.md`, overviews, tasks nem código. O `guard-writes` bloqueia Edit/Write fora disso; não contorne via Bash — o `stop-scan` pega no fim.
 3. **Guarda de drift antes de qualquer discussão** (seção 1). Commit sem prefixo `factory(` é, por definição, mudança externa — apresente ao operador antes de desenhar em cima (README §5, §6).
 4. **Template §12.4 verbatim**, referenciando os `AC-n` do PRD que cada decisão realiza. Não invente ACs fora do PRD.
-5. **GATE explícito:** o operador valida o design completo antes do commit. Sem aprovação explícita, nada é commitado.
+5. **GATE (sessão interativa):** o operador valida o design completo antes do commit. Sem aprovação explícita, nada é commitado. **Em run de `/autopilot`** não há operador no loop: decida pelo critério declarado e **grave no `design.md` as alternativas descartadas e o porquê** — a seção deixa de ser boa prática e passa a ser obrigatória, porque ela é a única auditoria que resta ao operador. Decidir sem registrar quebra a Lei (README §17). O gate não desaparece: o prompt-based hook do `Stop` cobra a cobertura dos `AC-n`.
 6. **Commit canônico como último ato de escrita:** `factory(design): <slug> — <resumo>`, com `git add` **nominal** (path explícito, nunca `.`/`-A`). Estágio que não commitou não aconteceu.
 7. **Board só depois do commit, e só ao concluir** — nunca ao iniciar. Emita APENAS verbos canônicos de `.claude/factory-process.md` (`move_feature`, `comment_feature`, `find_by_key`); nunca cite nome de tool de provider. Quem traduz e executa é o `board-writer`. Falha de board → try-reporta-prossegue: "não consegui atualizar o board, rode `/sync` depois".
 8. **Re-entrada gera pasta NOVA** (`docs/epics/<slug>-pNNN/`), com `design.md` e **sem** `prd.md`. O design original e o `pending.md` de origem são imutáveis para este estágio (README §9).

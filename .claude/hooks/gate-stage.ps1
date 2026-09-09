@@ -1,4 +1,11 @@
-﻿# gate-stage — UserPromptExpansion. Pré-condições de estágio ANTES de o modelo ver o prompt (README §5, §15).
+﻿# gate-stage — pré-condições de estágio ANTES de o estágio começar (README §5, §15).
+#
+# DOIS pontos de entrada, UMA cadeia de validação:
+#   UserPromptExpansion       — comando digitado pelo operador; bloqueia antes de o modelo ver o prompt
+#   PreToolUse(Skill)         — invocação pelo modelo (-FromSkill), o caminho do autopilot (§17)
+# O segundo existe porque não há prompt digitado numa invocação pelo modelo: sem ele o modo
+# autopilot entraria SEM pré-condição nenhuma — tree suja, artefato faltando e docs/** vencido
+# passariam calados, que são exatamente as guardas que o operador não percebe que tem.
 #
 # Valida, na ordem:
 #   1. papel (se -Role): o estágio pertence à lista do papel (§2)
@@ -7,19 +14,28 @@
 #   4. frescor: git fetch (timeout curto) e bloqueio se docs/** está behind do origin (§5)
 #      — behind confirmado = bloqueio e instrução do ff-only; fetch falho = aviso e prossegue.
 #
-# Uso (projeto, settings.json):   gate-stage.ps1
-# Uso (perfil de papel, ex. PO):  gate-stage.ps1 -Role po
+# Uso (projeto, settings.json):        gate-stage.ps1
+# Uso (projeto, PreToolUse(Skill)):    gate-stage.ps1 -FromSkill
+# Uso (perfil de papel, ex. PO):       gate-stage.ps1 -Role po
 
-param([string]$Role)
+param([string]$Role, [switch]$FromSkill)
 
 . "$PSScriptRoot\_lib.ps1"
 
 $in = Read-HookInput
 if (-not $in) { exit 0 }
-$prompt = [string]$in.prompt
-if (-not $prompt) { exit 0 }
-if ($prompt -notmatch '^\s*/(?:claude-factory:)?([a-z][a-z-]*)') { exit 0 }
-$stageName = $Matches[1]
+
+if ($FromSkill) {
+    # mesma normalização do guard-skill: o namespace do plugin não muda o estágio
+    $skill = [string]$in.tool_input.skill
+    if (-not $skill) { exit 0 }
+    $stageName = $skill -replace '^claude-factory:', ''
+} else {
+    $prompt = [string]$in.prompt
+    if (-not $prompt) { exit 0 }
+    if ($prompt -notmatch '^\s*/(?:claude-factory:)?([a-z][a-z-]*)') { exit 0 }
+    $stageName = $Matches[1]
+}
 
 $map = Get-StageMap
 if (-not $map) { exit 0 }

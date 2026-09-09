@@ -1,22 +1,44 @@
 #!/usr/bin/env bash
-# gate-stage — UserPromptExpansion. Pré-condições de estágio antes de o modelo ver o prompt
-# (README §5, §15). Espelho de gate-stage.ps1.
-# Uso: gate-stage.sh            (projeto)
-#      gate-stage.sh --role po  (perfil de papel)
+# gate-stage — pré-condições de estágio antes de o estágio começar (README §5, §15).
+# Espelho de gate-stage.ps1. DOIS pontos de entrada, UMA cadeia de validação:
+#   UserPromptExpansion    — comando digitado pelo operador
+#   PreToolUse(Skill)      — invocação pelo modelo (--from-skill), o caminho do autopilot (§17)
+# Uso: gate-stage.sh                (projeto, prompt digitado)
+#      gate-stage.sh --from-skill   (projeto, PreToolUse(Skill))
+#      gate-stage.sh --role po      (perfil de papel)
 
 . "$(dirname "$0")/_lib.sh"
 
 ROLE=""
-case "$1" in --role|-Role) ROLE="$2" ;; esac
+FROM_SKILL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --role|-Role)             ROLE="$2"; shift 2 ;;
+    --from-skill|-FromSkill)  FROM_SKILL=1; shift ;;
+    *)                        shift ;;
+  esac
+done
 
 input=$(cat)
-# pré-filtro cru: se nem parece comando de estágio, não exige jq (gate roda em TODO prompt)
-printf '%s' "$input" | grep -Eq '/(claude-factory:)?(vision|blueprint|ground|propose|promote|bug|design|tasks|code|close|setup|sync)' || exit 0
-require_jq
-prompt=$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)
-[ -n "$prompt" ] || exit 0
-
-stage=$(printf '%s' "$prompt" | sed -nE 's@^[[:space:]]*/(claude-factory:)?([a-z][a-z-]*).*@\2@p' | head -1)
+if [ "$FROM_SKILL" -eq 1 ]; then
+  # PreToolUse(Skill): não há prompt digitado — o estágio vem do tool_input. O pré-filtro do
+  # caminho digitado NÃO serve aqui: tool_input.skill é "design", sem a barra.
+  printf '%s' "$input" | grep -Eq '"skill"' || exit 0
+  require_jq
+  skill=$(printf '%s' "$input" | jq -r '.tool_input.skill // empty' 2>/dev/null)
+  [ -n "$skill" ] || exit 0
+  # mesma normalização do guard-skill: o namespace do plugin não muda o estágio
+  stage="${skill#claude-factory:}"
+else
+  # pré-filtro cru: se nem parece comando de estágio, não exige jq (gate roda em TODO prompt).
+  # A lista duplica os nomes do stage-map de propósito (evitar jq no caminho quente) — estágio
+  # novo tem de ser acrescentado AQUI também, senão ele roda sem gate no POSIX.
+  printf '%s' "$input" | grep -Eq '/(claude-factory:)?(vision|blueprint|ground|propose|promote|bug|design|tasks|code|close|setup|sync|autopilot)' || exit 0
+  require_jq
+  prompt=$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)
+  [ -n "$prompt" ] || exit 0
+  stage=$(printf '%s' "$prompt" | sed -nE 's@^[[:space:]]*/(claude-factory:)?([a-z][a-z-]*).*@\2@p' | head -1)
+fi
 [ -n "$stage" ] || exit 0
 
 [ -f "$(stage_map_path)" ] || exit 0
