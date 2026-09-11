@@ -1,21 +1,28 @@
 # Adapter Azure DevOps — manifesto de dados do contrato canônico (.claude/factory-process.md)
 # Destino no repo: .claude/adapters/azure-devops/manifest.yaml
-# Tools pinados contra o TOOLSET oficial do microsoft/azure-devops-mcp.
-# Nota: clientes podem exibir os nomes com namespace (ex: mcp_ado_wit_create_work_item);
-# o resolve do /setup casa por sufixo. O /setup valida cada tool via tools/list.
+# Tools pinados contra o TOOLSET CONSOLIDADO do microsoft/azure-devops-mcp (>= 2.9.0, conferido
+#   por tools/list em 2.10.0). A 2.9.0 (29/07/2026) colapsou 35 tools em 15: a operação agora
+#   viaja num parâmetro "action" obrigatório (ex.: wit_create_work_item -> wit_work_item_write
+#   action=create). O toolset de nomes 1:1 vale até a 2.8.1 — ver ADAPTER.md.
+# Nota: clientes podem exibir os nomes com namespace (ex: mcp_ado_wit_work_item_write);
+#   o resolve do /setup casa por sufixo. O /setup valida cada tool via tools/list.
 #
 # Hierarquia (4 níveis, capability grouping): epic→Epic, feature→Feature, story→User Story
 #   (agrupa tasks por história US-n do PRD — nível intermediário), task→ADO Task (o leaf). User
 #   Stories e Tasks são nativas e visíveis no board/backlog sob a Feature.
 # Tempo→campo nativo CompletedWork (horas) no ADO Task — nativo, SEM customização de processo.
-# Convenção: `for_each:` num passo `then` = laço interpretado pelo board-writer (itera os ids da
+# Convenção: for_each: num passo then = laço interpretado pelo board-writer (itera os ids da
 #   variável e une o resultado) — usado na leitura de dois níveis (read_tasks: Feature→Story→Task).
-# Conexão: LOCAL stdio + azcli (headless via `az login` na máquina); o remoto Entra/OAuth ainda
+# Conexão: LOCAL stdio + azcli (headless via az login na máquina); o remoto Entra/OAuth ainda
 #   NÃO suporta o Claude Code como cliente — ver ADAPTER.md §1.
-# Formas de argumento: alinhadas ao schema real do toolset — wit_create_work_item.fields[] (lista
-#   {name,value,format?}), wit_add_child_work_items.items[] (lista {title,description,format?}),
-#   wit_update_work_item.updates[] (patches {op,path,value}), wit_work_items_link.updates[]. São
-#   VALIDADAS pelo /setup via resolve.check: tool_arg_schemas; o smoke (ADAPTER §5) é a prova em runtime.
+# VERSÃO PINADA: o args flutuante (@azure-devops/mcp sem versão) fez a factory herdar o breaking
+#   change da 2.9.0 sem tocar uma linha do repo. O pino é a defesa: subir de versão passa a ser
+#   ato deliberado, validado pelo /setup (tools_list_contains + tool_arg_schemas).
+# Formas de argumento: alinhadas ao schema real do toolset consolidado — as SUB-formas
+#   sobreviveram à consolidação (fields[]={name,value,format?}, items[]={title,description,format?},
+#   updates[]={op,path,value}); mudaram o nome da tool, o action e dois campos: comment→text
+#   (comentário) e expand: relations→"Relations" (enum capitalizado). São VALIDADAS pelo /setup
+#   via resolve.check: tool_arg_schemas; o smoke (ADAPTER §5) é a prova em runtime.
 
 provider: azure-devops
 
@@ -26,9 +33,10 @@ mcp:
   local:                                  # stdio (Node 20+); credencial estabelecida FORA DE BANDA (az login), usada headless
     transport: stdio
     command: npx
-    args: ["-y", "@azure-devops/mcp", "${binding.organization}",
+    args: ["-y", "@azure-devops/mcp@2.10.0", "${binding.organization}",
            "-d", "core", "work-items", "search", "wiki",
-           "--authentication", "azcli"]   # cada operador roda `az login` 1x na máquina; alt. headless: pat | envvar — ADAPTER.md §1
+           "--authentication", "azcli"]   # versão PINADA (ver nota do cabeçalho); cada operador roda az login 1x na
+                                          # máquina; alt. headless: pat | envvar — ADAPTER.md §1
   remote:                                 # FUTURO — public preview; hoje só VS / VS Code (Copilot), NÃO Claude Code (ADAPTER.md §1)
     transport: http
     url: "https://mcp.dev.azure.com/${binding.organization}"
@@ -88,57 +96,61 @@ prerequisites:    # conduzidos pelo /setup — verifica por evidência; pergunta
       Projects → ⋯ → Change process → Factory.
     note: "divergência de nome de estado falha-rápido na 1ª transição (try-reporta-prossegue + /sync reparam); só a Feature é customizada (estados) — User Story e Task ficam de fábrica"
 
+
 resolve:                                  # /setup roda uma vez
   - { tool: core_list_projects, expect: "binding.project presente na lista" }
-  - { check: tools_list_contains, tools: [ wit_create_work_item, wit_update_work_item, wit_add_child_work_items, wit_work_items_link, wit_get_work_item, wit_get_work_items_batch_by_ids, wit_add_work_item_comment, wit_list_work_item_comments, search_workitem, wiki_list_wikis, wiki_create_or_update_page ] }
+  - { check: tools_list_contains, tools: [ wit_work_item_write, wit_work_item, wit_work_item_comment_write, wit_work_item_link_write, search_workitem, wiki, wiki_upsert_page, core_list_projects ] }
   - check: tool_arg_schemas               # valida as FORMAS de argumento, não só os nomes — drift de forma é tão real quanto de nome
     expectations:                         # uma string por tool: "args... — nota"; sufixo [] = a forma esperada é LISTA, não objeto
-      wit_create_work_item:            "project?, workItemType, fields[] — fields = lista de {name, value, format?}"
-      wit_add_child_work_items:        "parentId, project?, workItemType, items[] — items = lista de {title, description, format?}; workItemType único p/ todo o lote"
-      wit_update_work_item:            "id, updates[] — updates = lista de patches {op, path, value}"
-      wit_work_items_link:             "project?, updates[] — updates = lista de {id, linkToId, type, comment?}"
-      wit_add_work_item_comment:       "project?, workItemId, comment, format?"
-      search_workitem:                 "searchText, project?[], workItemType?[], state?[], top? — filtros são listas de string"
-      wit_get_work_item:               "id, project?, fields?[], expand?"
-      wit_get_work_items_batch_by_ids: "project?, ids[], fields?[]"
-  # Estados não são listáveis via MCP: o contrato é o pré-requisito inherited_process
+      wit_work_item_write:         "action(create|update|update_batch|add_child) OBRIGATÓRIO; create → project?, workItemType, fields[] {name,value,format?}; add_child → parentId, project?, workItemType, items[] {title,description,format?}; update → id, updates[] {op,path,value}"
+      wit_work_item:               "action(get|get_batch|list_comments|my|list_revisions|list_for_iteration|get_type) OBRIGATÓRIO; get → id, project?, fields?[], expand?(None|Relations|Fields|Links|All); get_batch → ids[], project?; list_comments → workItemId, project?"
+      wit_work_item_comment_write: "action(add|update) OBRIGATÓRIO; add → project?, workItemId, text, format?(Markdown|Html) — o campo do corpo é text, NÃO comment"
+      wit_work_item_link_write:    "action(link|unlink|link_to_pull_request|add_artifact_link) OBRIGATÓRIO; link → project?, updates[] {id,linkToId,type,comment?}"
+      search_workitem:             "searchText, project?[], workItemType?[], state?[], top? — filtros são listas de string (inalterado na consolidação)"
+      wiki_upsert_page:            "wikiIdentifier, path, content, project? — rename 1:1 de wiki_create_or_update_page; SEM action"
+      wiki:                        "action(list_wikis|get_wiki|list_pages|get_page|get_page_content) OBRIGATÓRIO; list_pages → wikiIdentifier, project?"
+  # Estados não são listáveis via MCP: o contrato deles é o pré-requisito inherited_process
   # (prerequisites:); divergência de nome falha-rápido na primeira transição
   # (try-reporta-prossegue + /sync).
 
 ops:
   create_epic:
-    tool: wit_create_work_item
+    tool: wit_work_item_write
     args:
+      action: create
       project: "{binding.project}"
       workItemType: "{entities.epic}"
-      fields:                             # wit_create_work_item.fields = LISTA de {name, value, format?}
+      fields:                             # fields = LISTA de {name, value, format?}
         - { name: "System.Title", value: "$title" }
         - { name: "System.Description", value: "$body", format: "Markdown" }
     then:
-      - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
+      - tool: wit_work_item_write         # identidade viaja como tag (dinâmica no ADO)
         args:
+          action: update
           id: "$created_id"
-          updates:                        # wit_update_work_item.updates = LISTA de patches {op, path, value}
+          updates:                        # updates = LISTA de patches {op, path, value}
             - { op: "add", path: "/fields/System.Tags", value: "factory-key:$key" }
     returns: id
 
   create_feature:                         # nasce filha do Epic, já em Ready (New está oculto no processo Factory)
-    tool: wit_add_child_work_items
+    tool: wit_work_item_write
     args:
+      action: add_child
       parentId: "$epic_id"
       project: "{binding.project}"
       workItemType: "{entities.feature}"
-      items:                              # wit_add_child_work_items.items = LISTA de {title, description, format?}
+      items:                              # items = LISTA de {title, description, format?}
         - { title: "$title", description: "$body", format: "Markdown" }
     then:
-      - tool: wit_update_work_item        # identidade viaja como tag (dinâmica no ADO)
+      - tool: wit_work_item_write         # identidade viaja como tag (dinâmica no ADO)
         args:
+          action: update
           id: "$created_id"
           updates:
             - { op: "add", path: "/fields/System.Tags", value: "factory-key:$key" }
     returns: id
 
-  find_by_key:                            # sem WIQL ad-hoc no toolset → busca de work items (domínio search)
+  find_by_key:                            # sem WIQL no caminho crítico → busca de work items (domínio search)
     tool: search_workitem
     args: { searchText: "factory-key:$key", project: ["{binding.project}"], workItemType: ["{entities.feature}"] }
     returns: first(results).id | null     # indexação tem latência de segundos — ver ADAPTER.md §4
@@ -149,32 +161,36 @@ ops:
     returns: first(results).id | null
 
   move_feature:                           # estágio é o System.State nativo (stage_label: none)
-    tool: wit_update_work_item
+    tool: wit_work_item_write
     args:
+      action: update
       id: "$feature_id"
       updates:
         - { op: "add", path: "/fields/System.State", value: "{states.$stage}" }
     returns: ok
 
   ensure_group:                           # find-or-create da User Story (grouping) filha da Feature; o board-writer roda find_group ANTES (recupera, não duplica)
-    tool: wit_add_child_work_items        # cria a User Story filha da Feature...
+    tool: wit_work_item_write             # cria a User Story filha da Feature...
     args:
+      action: add_child
       parentId: "$feature_id"
       project: "{binding.project}"
       workItemType: "{entities.story}"
       items:
         - { title: "$title", description: "$body", format: "Markdown" }
     then:
-      - tool: wit_update_work_item        # ...e aplica a identidade derivada do grupo (factory-key:<slug>#US-n)
+      - tool: wit_work_item_write         # ...e aplica a identidade derivada do grupo (factory-key:<slug>#US-n)
         args:
+          action: update
           id: "$created_id"
           updates:
             - { op: "add", path: "/fields/System.Tags", value: "factory-key:$group_key" }
     returns: id
 
   create_task:                            # task = ADO Task, filha da Story (parent_id = group_id; sem grouping seria o feature_id)
-    tool: wit_add_child_work_items
+    tool: wit_work_item_write
     args:
+      action: add_child
       parentId: "$parent_id"
       project: "{binding.project}"
       workItemType: "{entities.task}"
@@ -183,53 +199,58 @@ ops:
     returns: id
 
   complete_task:                          # tempo no campo nativo CompletedWork (horas) do ADO Task — nativo, sem customização de processo
-    tool: wit_update_work_item
+    tool: wit_work_item_write
     args:
+      action: update
       id: "$task_id"
       updates:
         - { op: "add", path: "/fields/System.State", value: "{task_done_state}" }
     then:
       - when: "$minutes != null"
-        tool: wit_update_work_item        # capability time: field — CompletedWork é Double em HORAS, nativo no Task
+        tool: wit_work_item_write         # capability time: field — CompletedWork é Double em HORAS, nativo no Task
         args:
+          action: update
           id: "$task_id"
           updates:
             - { op: "add", path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", value: "$minutes / 60" }   # minutos → horas (2 casas; ex.: 90 → 1.5)
       - when: "$note != null"
-        tool: wit_add_work_item_comment   # aprendizado da implementação ([factory:note])
-        args: { project: "{binding.project}", workItemId: "$task_id", comment: "$note", format: "Markdown" }
+        tool: wit_work_item_comment_write # aprendizado da implementação ([factory:note])
+        args: { action: "add", project: "{binding.project}", workItemId: "$task_id", text: "$note", format: "Markdown" }
     returns: ok
 
   comment_feature:                        # trilha do ciclo: design.md, closure-notes.md
-    tool: wit_add_work_item_comment
-    args: { project: "{binding.project}", workItemId: "$feature_id", comment: "$body", format: "Markdown" }
+    tool: wit_work_item_comment_write
+    args: { action: "add", project: "{binding.project}", workItemId: "$feature_id", text: "$body", format: "Markdown" }
 
   update_body:                            # re-projeção da descrição (espelho) — identidade é tag, descrição fica limpa
-    tool: wit_update_work_item
+    tool: wit_work_item_write
     args:
+      action: update
       id: "$item_id"
       updates:
         - { op: "add", path: "/fields/System.Description", value: "$body" }
     returns: ok
 
   read_item:                              # leitura para o no-op do update_body (comparar descrição atual)
-    tool: wit_get_work_item
-    args: { id: "$item_id", project: "{binding.project}" }
+    tool: wit_work_item
+    args: { action: "get", id: "$item_id", project: "{binding.project}" }
 
   read_comments:                          # leitura para o ensure-por-marcador do comment_feature
-    tool: wit_list_work_item_comments
-    args: { project: "{binding.project}", workItemId: "$item_id" }
+    tool: wit_work_item
+    args: { action: "list_comments", project: "{binding.project}", workItemId: "$item_id" }
 
   link_related:
-    tool: wit_work_items_link
+    tool: wit_work_item_link_write
     args:
+      action: link
       project: "{binding.project}"
-      updates:                            # wit_work_items_link.updates = LISTA de {id, linkToId, type, comment?}
+      updates:                            # updates = LISTA de {id, linkToId, type, comment?}
         - { id: "$feature_id", linkToId: "$related_id", type: "related" }
 
   tag_feature:                            # Tag é SET, não patch: o board-writer lê as tags atuais (read_item) e regrava o conjunto
-    tool: wit_update_work_item
+    tool: wit_work_item_write
     args:
+      action: update
       id: "$feature_id"
       updates:
         - { op: "add", path: "/fields/System.Tags", value: "$tags_merged" }   # $tags_merged = tags atuais + $tag (sep. "; "), preservando as existentes
@@ -240,33 +261,33 @@ ops:
     tool: search_workitem
     args: { searchText: "factory-key:", project: ["{binding.project}"], workItemType: ["{entities.epic}", "{entities.feature}"] }
     then:
-      - tool: wit_get_work_items_batch_by_ids
-        args: { project: "{binding.project}", ids: "$result_ids" }
+      - tool: wit_work_item
+        args: { action: "get_batch", project: "{binding.project}", ids: "$result_ids" }
 
   read_groups:                            # /sync: as User Stories (grouping) filhas da Feature, por relação parent
-    tool: wit_get_work_item
-    args: { id: "$feature_id", project: "{binding.project}", expand: "relations" }
+    tool: wit_work_item
+    args: { action: "get", id: "$feature_id", project: "{binding.project}", expand: "Relations" }   # enum CAPITALIZADO (None|Relations|Fields|Links|All)
     then:
-      - tool: wit_get_work_items_batch_by_ids
-        args: { project: "{binding.project}", ids: "$child_story_ids" }   # filhos User Story via System.LinkTypes.Hierarchy-Forward
+      - tool: wit_work_item
+        args: { action: "get_batch", project: "{binding.project}", ids: "$child_story_ids" }   # filhos User Story via System.LinkTypes.Hierarchy-Forward
 
   read_tasks:                             # tasks pela RELAÇÃO parent — com grouping, DESCE dois níveis: Feature → User Story → Task
-    tool: wit_get_work_item               # nível 1: as User Stories filhas da Feature
-    args: { id: "$feature_id", project: "{binding.project}", expand: "relations" }
+    tool: wit_work_item                   # nível 1: as User Stories filhas da Feature
+    args: { action: "get", id: "$feature_id", project: "{binding.project}", expand: "Relations" }
     then:
       - for_each: "$child_story_ids"      # nível 2: para CADA User Story, seus filhos Task (board-writer itera e une os ids)
-        tool: wit_get_work_item
-        args: { id: "$story_id", project: "{binding.project}", expand: "relations" }
-      - tool: wit_get_work_items_batch_by_ids
-        args: { project: "{binding.project}", ids: "$task_ids" }          # hidrata as Tasks reunidas dos grupos
+        tool: wit_work_item
+        args: { action: "get", id: "$story_id", project: "{binding.project}", expand: "Relations" }
+      - tool: wit_work_item
+        args: { action: "get_batch", project: "{binding.project}", ids: "$task_ids" }          # hidrata as Tasks reunidas dos grupos
 
   wiki_publish_page:                      # capability wiki: native (opt-in — default da factory é repo-markdown)
-    tool: wiki_create_or_update_page
+    tool: wiki_upsert_page
     args: { project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}", path: "$root/$slug", content: "$content" }
 
   wiki_read_index:
-    tool: wiki_list_pages
-    args: { project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}" }
+    tool: wiki
+    args: { action: "list_pages", project: "{binding.project}", wikiIdentifier: "{binding.wiki_id}" }
 
 capabilities:
   hierarchy: native                       # Epic > Feature > User Story > Task via add_child / parent links
@@ -276,7 +297,7 @@ capabilities:
   identity: tag                           # factory-key como System.Tags — dinâmica, nada a provisionar (Features E User Stories de grupo)
   stage_label: none                       # 6 estados exatos do processo Factory — o System.State é o contrato; marcador só em provider que colapsa estados
   time: field                             # Microsoft.VSTS.Scheduling.CompletedWork (horas) — NATIVO no ADO Task, sem customização (ADAPTER.md §4)
-  related: native                         # wit_work_items_link
+  related: native                         # wit_work_item_link_write action=link
   tags: native                            # tags do ADO são criadas ao aplicar
   search: required                        # find_by_key depende do domínio search (Work Item Search)
-  wiki: native                            # ADO Wiki via wiki_create_or_update_page (opt-in)
+  wiki: native                            # ADO Wiki via wiki_upsert_page (opt-in)
