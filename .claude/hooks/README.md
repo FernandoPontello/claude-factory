@@ -11,9 +11,9 @@ implícito.
 |---|---|---|---|
 | `gate-stage` | `UserPromptExpansion` | pré-condições de estágio: papel, tree limpa ou suja só no próprio write-set, artefato requerido, frescor de `docs/**` contra o **trunk remoto** e trunk obrigatório para estágios `requiresTrunk` (§5) | `.claude/settings.json` (projeto) e frontmatter dos perfis `po`/`dev` com `-Role` |
 | `guard-git` | `PreToolUse(Bash)` | operações git proibidas; só `fetch` e `pull --ff-only` sincronizam; add nominal (§5, §15) | `.claude/settings.json` (projeto) e frontmatter do `coder` (com `-Worker`: nega também push/fetch/pull — "push fora de hora" no runtime de workflow) |
-| `guard-writes` | `PreToolUse(Edit\|Write)` | single-writer durante o estágio (§14) | frontmatter de cada skill (`-Stage`) e do perfil `po` (`-Role po`: união dos write-sets do papel; o `-Stage` da skill ativa aperta) |
+| `guard-writes` | `PreToolUse(Edit\|Write)` | single-writer durante o estágio (§14); em run de autopilot, do estágio em curso na sentinela (ver "Acumulação de hooks") | frontmatter de cada skill (`-Stage`) e do perfil `po` (`-Role po`: união dos write-sets do papel; o `-Stage` da skill ativa aperta) |
 | `guard-skill` | `PreToolUse(Skill)` | papel não invoca estágio fora da sua lista (§2) | frontmatter dos perfis `po`/`dev` |
-| `stop-scan` | `Stop` | brecha de escrita via Bash e de sub-agents genéricos (sem frontmatter, sem guard in-flight): dirty fora do write-set bloqueia o fechamento (§15) | frontmatter das skills de estágio (no `/code`, o Stop é do `check-toca`) |
+| `stop-scan` | `Stop` | brecha de escrita via Bash e de sub-agents genéricos (sem frontmatter, sem guard in-flight): dirty fora do write-set bloqueia o fechamento (§15); em run de autopilot, mesma resolução do `guard-writes` | frontmatter das skills de estágio (no `/code`, o Stop é do `check-toca`) |
 | `check-toca` | `Stop` (só `/code`) | o `Toca` é contrato verificado, não declaração (§10); o `gate-stage` delega a ele a checagem de retomada do `/code` | frontmatter da skill `/code` e do `coder` |
 | `inject-invariants` | `SessionStart(compact)` | invariantes sobrevivem à compaction (§10) | `.claude/settings.json` (projeto) |
 | `board-gate` | `PreToolUse(mcp__*)` | board só projeta verdade commitada (§5) | frontmatter do `board-writer` |
@@ -43,3 +43,32 @@ vale integralmente. Sub-agents genéricos não carregam frontmatter e não têm 
 escrita in-flight: escrita persistente deles fora do write-set é sujeira acusada pelo
 `stop-scan`, e efeito transitório não entra na verdade — a fronteira é o commit (§5). O
 canário do `/setup` verifica cada camada pelo seu mecanismo real.
+
+## Acumulação de hooks e runs de autopilot
+
+Hooks `PreToolUse`/`Stop` de frontmatter de skill **acumulam**: invocar `/tasks` não
+desativa o `guard-writes -Stage design` da skill anterior — soma-se a ele. Como hooks
+compõem por **AND**, dois write-sets diferentes intersectam em **vazio**, e num run de
+`/autopilot` (§17) isso trava todo estágio filho: o primeiro run real abortou assim, na
+escrita do `design.md`.
+
+Por isso, **dentro de um run**, `guard-writes` e `stop-scan` não resolvem o write-set do
+estágio que registrou o hook, e sim o do estágio que a sentinela
+`.claude/.factory/autopilot/active.json` declara **em curso** (item com `state: em-curso`),
+mais `.claude/.factory/autopilot/**` — o manifesto do run, que o orquestrador atualiza a
+cada transição com o guard do filho já acumulado. Todos os hooks acumulados passam a
+resolver o **mesmo** conjunto, e o AND deixa de zerar.
+
+A resolução é a aritmética do `guard-autopilot`: **teto ∩ escopo** — `stages` da sentinela
+∩ `stages.autopilot.orchestrates` do `stage-map.json`. Sentinela é runtime; não amplia o
+que o contrato versionado não declarou. Degradações, todas para o lado estreito:
+
+| Situação | Write-set efetivo |
+|---|---|
+| sem sentinela | o do estágio isolado (comportamento histórico) |
+| sentinela ilegível | o do estágio isolado — degradar aqui aperta a guarda |
+| sentinela sem item `em-curso` | união dos write-sets do escopo (∩ teto) |
+| estágio fora do escopo do run (ex.: `/promote` digitado pelo operador) | o dele mesmo |
+| posição defasada na sentinela | bloqueio explicável: a mensagem manda atualizar a posição |
+
+`check-toca` (Stop do `/code`) acumula pela mesma mecânica e **não** foi tratado aqui.

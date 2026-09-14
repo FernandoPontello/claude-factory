@@ -8,6 +8,10 @@
 # Sujeira DENTRO do write-set não bloqueia: estágios de discussão param várias vezes
 # antes do commit final. O que este hook vigia é fronteira, não conclusão.
 #
+# DENTRO de um run de autopilot (§17) o write-set é o do estágio em curso na sentinela, e não
+# o do estágio que registrou este hook — hooks de Stop acumulam igual aos de PreToolUse
+# (ver Get-AutopilotWriteGlobs em _lib.ps1).
+#
 # Uso: stop-scan.ps1 -Stage design
 
 param([Parameter(Mandatory = $true)][string]$Stage)
@@ -16,13 +20,21 @@ param([Parameter(Mandatory = $true)][string]$Stage)
 
 $map = Get-StageMap
 if (-not $map -or -not $map.stages.$Stage) { exit 0 }
-$globs = @($map.stages.$Stage.writes) + '.claude/agent-memory/**'
+$runGlobs = Get-AutopilotWriteGlobs $map $Stage
+$runStage = ''
+if ($runGlobs) {
+    $runStage = Get-AutopilotCurrentStage $map
+    $globs = @($runGlobs) + '.claude/agent-memory/**'
+} else {
+    $globs = @($map.stages.$Stage.writes) + '.claude/agent-memory/**'
+}
 
 $dirty = Get-DirtyPaths
 $foreign = @($dirty | Where-Object { -not (Test-MatchesGlobs $_ $globs) })
 
 if ($foreign.Count -gt 0) {
-    Deny ("stop-scan: escrita fora do write-set de /$Stage detectada no working tree:`n" +
+    $alvo = if ($runStage) { "/$runStage (estágio em curso no run de autopilot)" } else { "/$Stage" }
+    Deny ("stop-scan: escrita fora do write-set de $alvo detectada no working tree:`n" +
           "  $($foreign -join "`n  ")`n" +
           "Single-writer (§14): reverta esses paths (git rm/restauração manual do conteúdo original) ou explique ao operador por que a exceção se justifica antes de encerrar.")
 }
