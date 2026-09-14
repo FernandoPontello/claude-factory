@@ -14,7 +14,7 @@ implícito.
 | `guard-writes` | `PreToolUse(Edit\|Write)` | single-writer durante o estágio (§14); em run de autopilot, do estágio em curso na sentinela (ver "Acumulação de hooks") | frontmatter de cada skill (`-Stage`) e do perfil `po` (`-Role po`: união dos write-sets do papel; o `-Stage` da skill ativa aperta) |
 | `guard-skill` | `PreToolUse(Skill)` | papel não invoca estágio fora da sua lista (§2) | frontmatter dos perfis `po`/`dev` |
 | `stop-scan` | `Stop` | brecha de escrita via Bash e de sub-agents genéricos (sem frontmatter, sem guard in-flight): dirty fora do write-set bloqueia o fechamento (§15); em run de autopilot, mesma resolução do `guard-writes` | frontmatter das skills de estágio (no `/code`, o Stop é do `check-toca`) |
-| `check-toca` | `Stop` (só `/code`) | o `Toca` é contrato verificado, não declaração (§10); o `gate-stage` delega a ele a checagem de retomada do `/code` | frontmatter da skill `/code` e do `coder` |
+| `check-toca` | `Stop` (só `/code`) | o `Toca` é contrato verificado, não declaração (§10); o `gate-stage` delega a ele a checagem de retomada do `/code`; em run de autopilot, no-op quando a posição em curso não é `code` | frontmatter da skill `/code` e do `coder` |
 | `inject-invariants` | `SessionStart(compact)` | invariantes sobrevivem à compaction (§10) | `.claude/settings.json` (projeto) |
 | `board-gate` | `PreToolUse(mcp__*)` | board só projeta verdade commitada (§5) | frontmatter do `board-writer` |
 | `board-log-failure` | `PostToolUseFailure(mcp__*)` | falha de board capturada estruturadamente (§11) | frontmatter do `board-writer` |
@@ -71,4 +71,7 @@ que o contrato versionado não declarou. Degradações, todas para o lado estrei
 | estágio fora do escopo do run (ex.: `/promote` digitado pelo operador) | o dele mesmo |
 | posição defasada na sentinela | bloqueio explicável: a mensagem manda atualizar a posição |
 
-`check-toca` (Stop do `/code`) acumula pela mesma mecânica e **não** foi tratado aqui.
+O `check-toca` (Stop do `/code`) fecha pela mesma chave, do outro lado: quando a sentinela
+declara um estágio em curso que **não** é o `/code`, ele vira no-op — a tree suja é do outro
+estágio, e quem vigia a fronteira dela é o `stop-scan` daquele estágio. Sentinela ausente,
+ilegível ou sem posição legível não silencia guard nenhum: degradar é continuar checando.

@@ -7,6 +7,16 @@
 
 . "$PSScriptRoot\_lib.ps1"
 
+# Acumulação de hooks num run de autopilot (§17): o Stop do /code continua registrado depois
+# que o estágio termina. O /close ou o /design seguinte para com a tree suja DELE, e este hook
+# acusaria paths que não pertencem a task nenhuma — bloqueio sem defeito real. Quando a
+# sentinela declara OUTRO estágio em curso, quem vigia a fronteira é o stop-scan daquele
+# estágio, que já resolve o write-set pela mesma posição. Aqui, no-op.
+# Sentinela ausente, ilegível ou sem posição legível NÃO silencia: degradar aqui é continuar
+# checando. E a posição só vale dentro de teto ∩ escopo (Get-AutopilotCurrentStage).
+$currentStage = Get-AutopilotCurrentStage (Get-StageMap)
+if ($currentStage -and $currentStage -ne 'code') { exit 0 }
+
 $dirty = Get-DirtyPaths
 if ($dirty.Count -eq 0) { exit 0 }
 

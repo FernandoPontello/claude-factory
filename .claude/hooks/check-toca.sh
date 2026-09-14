@@ -4,6 +4,15 @@
 
 . "$(dirname "$0")/_lib.sh"
 
+# Acumulação de hooks num run de autopilot (§17): o Stop do /code segue registrado depois do
+# estágio. Se o /close ou o /design seguinte para com a tree suja DELE, este hook acusaria
+# paths que não são de task nenhuma. Com outro estágio em curso na sentinela, quem vigia a
+# fronteira é o stop-scan dele — aqui, no-op. Sentinela ausente, ilegível ou sem posição não
+# silencia: degradar aqui é continuar checando.
+require_jq
+current=$(autopilot_current_stage)
+[ -z "$current" ] || [ "$current" = "code" ] || exit 0
+
 dirty=$(dirty_paths)
 [ -n "$dirty" ] || exit 0
 
