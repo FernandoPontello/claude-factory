@@ -4,16 +4,6 @@ description: Executo uma fila de trabalho já comprometido encadeando /design �
 argument-hint: "<épico-slug | épico-slug#pendência>... [--max-depth N] [--max-items N] [--stages design,tasks,code,close]"
 disable-model-invocation: true
 allowed-tools: Bash(git status *) Bash(git log *) Bash(git diff *) Bash(git show *)
-hooks:
-  PreToolUse:
-    - matcher: "Edit|Write|NotebookEdit"
-      hooks:
-        - type: command
-          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-writes.ps1" -Stage autopilot
-  Stop:
-    - hooks:
-        - type: command
-          command: powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-scan.ps1" -Stage autopilot
 ---
 
 # /autopilot — orquestração de fila comprometida
