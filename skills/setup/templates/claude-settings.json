@@ -1,0 +1,15 @@
+{
+  "extraKnownMarketplaces": {
+    "factory-marketplace": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/FernandoPontello/claude-factory.git",
+        "ref": "nova-factory"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "factory@factory-marketplace": true
+  }
+}

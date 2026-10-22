@@ -42,3 +42,15 @@ Para experimentar o plugin sem publicar, abra o Claude Code num projeto de teste
 - **Texto para pessoas em português claro e direto.** Nomes de estado do board são ASCII de uma
   palavra (`Integrado`, `Homologando`), porque o Azure DevOps os lê na descrição da PR.
 - **Mudou o comportamento de um script:** teste em `scripts/tests/` na mesma mudança.
+
+## Versão e canal de distribuição
+
+- **Durante o piloto, o `plugin.json` fica sem `version`.** O Claude Code usa o commit como versão,
+  então cada push na branch do piloto chega ao time pelo auto-update.
+- **Ao estabilizar na `main`:**
+  - volte a declarar `version` e suba a cada release. Com versão fixa, ninguém recebe commits novos
+    até a string mudar;
+  - troque o `ref` em `skills/setup/templates/claude-settings.json` de `nova-factory` para `main`;
+  - rode o `/setup` de novo nos projetos, que atualiza a declaração no `.claude/settings.json`.
+- **A declaração do plugin nos projetos sai desse mesmo modelo.** Mudar o repositório do
+  marketplace (por exemplo, para o Azure Repos) também é mudar esse arquivo.

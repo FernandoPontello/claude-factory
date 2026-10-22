@@ -50,12 +50,14 @@ de conserto e espere a pessoa rodar:
 - login: `az login`, no tenant da organização;
 - Node menor que 20: atualizar.
 
-Com projeto já configurado, a parte de máquina termina aqui, mais dois passos:
+Com projeto já configurado, a parte de máquina termina aqui, mais três passos:
 
 1. `npx playwright install chromium`, se o projeto tem testes de aceite.
 2. `run prove`, que prova que a receita funciona nesta máquina.
+3. `run ensure-settings`. Se ele responder `changed: true`, o projeto ainda não declarava o
+   plugin: essa mudança segue o fluxo da seção 9 (PR).
 
-Mostre o resultado. Não commite nada.
+Mostre o resultado. Fora o caso do passo 3, não commite nada.
 
 ## 3. Azure DevOps
 
@@ -77,7 +79,8 @@ faltam.
 1. Crie na `main`:
    - um `README.md` curto com o nome do produto;
    - o `.gitignore` com o bloco de `${CLAUDE_SKILL_DIR}/templates/gitignore.txt`;
-   - o bloco da factory no `CLAUDE.md` (`${CLAUDE_SKILL_DIR}/templates/claude-block.md`).
+   - o bloco da factory no `CLAUDE.md` (`${CLAUDE_SKILL_DIR}/templates/claude-block.md`);
+   - o `.claude/settings.json` com a declaração do plugin: `run ensure-settings`.
 2. Commit `chore: início do projeto` e push da `main`. Confirme antes de fazer o push.
 3. `ado setup apply --only branches`.
 4. Pule para a seção 9 (policies).
@@ -172,7 +175,14 @@ Com OK explícito para cada bloco:
 
 ## 9. Fechamento
 
-1. **Bloco da factory no `CLAUDE.md` e no `.gitignore`**, se faltarem. Use os modelos.
+1. **Arquivos da factory no repo**, se faltarem:
+   - o bloco no `CLAUDE.md` e no `.gitignore`, pelos modelos;
+   - a declaração do plugin no `.claude/settings.json`: `run ensure-settings`.
+     - Ele acrescenta o marketplace `factory-marketplace` (com auto-update) e o plugin
+       `factory@factory-marketplace`, preserva o resto do arquivo e tira as entradas da factory
+       antiga.
+     - Com isso, quem abrir o projeto e confiar na pasta recebe a factory sem digitar comando.
+       Diga isso ao time.
 2. **Policies antes da PR:** `ado setup apply --only policies`. Assim a PR do setup também precisa
    de aprovação humana, como qualquer outra. Exige Project Administrator; se falhar por
    permissão, diga quem precisa rodar e siga.

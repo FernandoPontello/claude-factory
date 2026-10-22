@@ -10,11 +10,13 @@
 //   report                                            gera relatorio-vN.html e pr-summary.md
 //   status                                            resumo para retomar o run
 //   prove                                             (sem --id) prova a receita para o /setup
+//   ensure-settings                                   (sem --id) declara o plugin no .claude/settings.json
 
 import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FactoryError, isEntryPoint, parseArgs, required, run, toId } from './lib/cli.mjs';
 import { git, resolveConfig } from './lib/config.mjs';
 import { appendCheck, appendMark, readChecks, readMarks, readState, runDir, writeState } from './lib/runs.mjs';
@@ -490,6 +492,40 @@ function cmdReport(cfg, args) {
   return { version, verdict: verdict.ok ? 'pronto' : 'com-ressalvas', warnings, html: htmlFile, prSummary: summaryFile };
 }
 
+// ---------- settings do projeto ----------
+
+const SETTINGS_TEMPLATE = new URL('../skills/setup/templates/claude-settings.json', import.meta.url);
+
+/**
+ * /setup: declara o marketplace e o plugin no .claude/settings.json do projeto, para quem abrir o
+ * projeto (e confiar na pasta) receber a factory sem digitar comando. Preserva tudo o que já
+ * existe no arquivo e tira só as entradas da factory antiga.
+ */
+function cmdEnsureSettings(cfg) {
+  const template = JSON.parse(readFileSync(fileURLToPath(SETTINGS_TEMPLATE), 'utf8'));
+  const file = join(cfg.root, '.claude', 'settings.json');
+  let current = {};
+  if (existsSync(file)) {
+    try {
+      current = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    } catch (err) {
+      throw new FactoryError('config', `.claude/settings.json não é um JSON válido: ${err.message}`, 'Corrija o arquivo antes de rodar o setup.');
+    }
+  }
+  const next = { ...current };
+  const marketplaces = { ...(current.extraKnownMarketplaces ?? {}) };
+  delete marketplaces['claude-factory-marketplace'];
+  next.extraKnownMarketplaces = { ...marketplaces, ...template.extraKnownMarketplaces };
+  const plugins = Object.fromEntries(Object.entries(current.enabledPlugins ?? {}).filter(([key]) => !key.startsWith('claude-factory@')));
+  next.enabledPlugins = { ...plugins, ...template.enabledPlugins };
+  const changed = JSON.stringify(next) !== JSON.stringify(current);
+  if (changed) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(next, null, 2) + '\n');
+  }
+  return { changed, file, marketplace: template.extraKnownMarketplaces };
+}
+
 // ---------- roteamento ----------
 
 const COMMANDS = {
@@ -501,6 +537,7 @@ const COMMANDS = {
   'app-stop': cmdAppStop,
   report: cmdReport,
   prove: cmdProve,
+  'ensure-settings': cmdEnsureSettings,
 };
 
 export async function dispatch(argv) {

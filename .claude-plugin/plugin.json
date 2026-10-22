@@ -1,6 +1,5 @@
 {
   "name": "factory",
-  "version": "2.0.0",
   "description": "Factory de desenvolvimento com Claude e Azure DevOps: o PO grava PRDs no board, o dev executa cada PRD numa sessão e aprova um relatório com evidências, e um humano aprova a PR.",
   "author": {
     "name": "Fernando Pontello",

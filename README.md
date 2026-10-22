@@ -93,13 +93,28 @@ CLAUDE.md               # bloco da factory com a regra de manter docs/system em 
 Requisitos em cada máquina: Node 20+, Git, Azure CLI (`az login` no tenant da organização) e
 Claude Code.
 
+**Quem prepara o projeto** instala o plugin na própria máquina uma vez (vale em todos os
+projetos) e roda `/setup` no projeto:
+
 ```
-/plugin marketplace add FernandoPontello/claude-factory
-/plugin install factory@factory-marketplace
+claude plugin marketplace add "https://github.com/FernandoPontello/claude-factory#nova-factory"
+claude plugin install factory@factory-marketplace
 ```
 
-Para testar uma branch antes da main, adicione o marketplace com `#<branch>` no fim. Depois, no
-projeto, rode `/setup`. A configuração que só o admin da organização faz, uma vez só, está em
+Use a URL HTTPS: o formato curto `FernandoPontello/claude-factory` tenta SSH primeiro e falha em
+máquina sem chave SSH no GitHub. O `#nova-factory` fixa a branch do piloto.
+
+**O resto do time não digita nada.**
+- O `/setup` grava no `.claude/settings.json` do projeto a declaração do marketplace (com
+  auto-update) e do plugin.
+- Quem abre o projeto no Claude Code e confia na pasta recebe a factory sozinho.
+- Em pasta não confiada, a declaração é ignorada.
+
+**Atualizações.** Durante o piloto o `plugin.json` não tem `version`, então cada commit na branch
+vira uma atualização. Com auto-update, ela chega sozinha. Para buscar na hora:
+`claude plugin marketplace update` e depois `claude plugin update factory@factory-marketplace`.
+
+A configuração que só o admin da organização faz, uma vez só, está em
 [docs/ADMIN.md](docs/ADMIN.md).
 
 ## Para quem mexe na factory
