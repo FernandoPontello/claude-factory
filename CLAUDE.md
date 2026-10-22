@@ -1,26 +1,44 @@
-# Claude Factory
+# Factory (este repositório)
 
-Pipeline de desenvolvimento assistido por IA: PO define o quê, Dev define o como, o board é projeção do filesystem e o commit é a fronteira da verdade.
+Este repo é o plugin `factory` do Claude Code. Ele não é um projeto que usa a factory: é a
+factory em si. A descrição do fluxo para quem usa está no [README.md](README.md).
 
-**A Lei da Factory:** a IA ajuda a pensar; quem decide é o operador.
+## Estrutura
 
-## Ponteiros
+| Caminho | O que é |
+| --- | --- |
+| `.claude-plugin/` | manifesto do plugin e do marketplace |
+| `skills/<comando>/SKILL.md` | os quatro comandos: `setup`, `prd`, `deliver`, `release` |
+| `skills/*/` | modelos usados por cada skill (dossiê, formato do relatório, templates do setup) |
+| `agents/` | `reviewer` (revisão por lente) e `scanner` (leitura de código para docs/system) |
+| `scripts/ado.mjs` | única porta para o Azure DevOps (API REST + token do `az login`) |
+| `scripts/run.mjs` | executor local do run: estado, verificações com registro, app, relatório |
+| `scripts/lib/` | código compartilhado dos scripts |
+| `scripts/hooks/` | hook do `/prd` que impede o PO de escrever no repo |
+| `scripts/tests/` | testes dos scripts (`node:test`, Azure DevOps simulado) |
+| `docs/ADMIN.md` | configuração única do admin da organização |
 
-- **Regras conceituais** (princípios, ciclo de vida, formatos canônicos): [README.md](README.md)
-- **Convenções operacionais** (git, filesystem, board, épicos): `.claude/rules/factory/` — carregadas automaticamente
-- **Contrato canônico do board** (entidades, estados, verbos, derivação): [.claude/factory-process.md](.claude/factory-process.md)
-- **Binding do provider ativo**: `.claude/kanban-config.json` — escrito por `/setup`
-- **Receita de build/run**: `.claude/build-run.md` — gravada por `/setup`, consumida pelo `verifier`
+## Como testar
 
-## Identidade dos artefatos
+```
+npm test
+```
 
-| Onde | O quê |
-|---|---|
-| `docs/proposals/` | idealização (descartável; nunca toca o board) |
-| `docs/overviews/` | definição do que o projeto é agora (não é log) |
-| `docs/epics/<slug>/` | trabalho comprometido: prd, design, tasks, pending, closure-notes |
-| `docs/wiki/` | wiki repo-first (default) |
+Para experimentar o plugin sem publicar, abra o Claude Code num projeto de teste com
+`claude --plugin-dir <caminho deste repo>`.
 
-Comandos de estágio são invocados **só pelo operador**. Nunca invoque um estágio em nome do usuário: ao concluir, informe o próximo passo — não o execute.
+## Convenções
 
-**Única exceção — modo autopilot (README §17).** `/design`, `/tasks`, `/code`, `/close` e `/sync` são invocáveis pelo modelo **enquanto existe um run ativo**, iniciado pelo operador, e só dentro do teto `stages.autopilot.orchestrates` ∩ escopo da sentinela. O `guard-autopilot` torna isso físico. O `/autopilot` em si mantém `disable-model-invocation`: iniciar um run é sempre ato do operador, porque é ali que ele pré-delega as decisões. Nesse modo, decisão tomada **tem de ficar registrada** no artefato do estágio — decidir sem rastro quebra a Lei, não a flexibiliza.
+- **Scripts sem dependências**, Node 20+, ESM, compatíveis com Windows e POSIX.
+- **Todo comando de script imprime um objeto JSON** e sai com um código que diz o que fazer:
+  `0` ok, `1` erro, `2` login, `3` não encontrado, `4` conflito, `5` configuração, `6` limite de
+  tentativas. Erros trazem `error` e `fix` em português.
+- **Rodar duas vezes nunca duplica nada no board.** Toda escrita confere antes: chave, marcador,
+  PR ativa.
+- **As skills citam os scripts por `${CLAUDE_PLUGIN_ROOT}`** e os modelos por
+  `${CLAUDE_SKILL_DIR}`, sempre com o caminho entre aspas.
+- **As regras inegociáveis de cada skill ficam no topo**, porque a plataforma preserva o começo da
+  skill quando a sessão compacta.
+- **Texto para pessoas em português claro e direto.** Nomes de estado do board são ASCII de uma
+  palavra (`Integrado`, `Homologando`), porque o Azure DevOps os lê na descrição da PR.
+- **Mudou o comportamento de um script:** teste em `scripts/tests/` na mesma mudança.

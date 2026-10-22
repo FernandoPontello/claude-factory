@@ -1,18 +1,17 @@
 {
-  "name": "claude-factory-marketplace",
+  "name": "factory-marketplace",
   "owner": {
-    "name": "Fernando Pontello",
-    "email": "pontellofernando@gmail.com"
+    "name": "Fernando Pontello"
   },
   "metadata": {
-    "description": "Marketplace privado da Claude Factory",
-    "version": "0.1.0"
+    "description": "Marketplace privado da factory",
+    "version": "2.0.0"
   },
   "plugins": [
     {
-      "name": "claude-factory",
-      "source": "./",
-      "description": "Pipeline PO/Dev com board agnóstico via MCP — gate humano, single-writer, commit como fronteira da verdade.",
+      "name": "factory",
+      "source": ".",
+      "description": "PRD no Azure DevOps, uma sessão por PRD, relatório com evidências e PR com aprovação humana.",
       "category": "workflow"
     }
   ]

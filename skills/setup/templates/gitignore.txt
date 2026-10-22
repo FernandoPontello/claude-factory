@@ -1,0 +1,3 @@
+# factory: estado local dos runs, rascunhos e relatórios (só o project.json vai para o git)
+.factory/*
+!.factory/project.json

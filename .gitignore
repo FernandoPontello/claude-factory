@@ -1,5 +1,4 @@
-# Rastro de runtime da factory (logs de falha do board etc.)
-.claude/.factory/
+# Estado local de runs, caso alguém rode os scripts dentro deste repo
+.factory/
 
-# Memória institucional dos agents é VERSIONADA de propósito (README §15):
-# .claude/agent-memory/ NÃO entra aqui.
+node_modules/
