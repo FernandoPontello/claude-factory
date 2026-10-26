@@ -28,6 +28,34 @@ export function makeRepo({ project = null, remote = 'https://dev.azure.com/conto
 }
 
 /**
+ * Pasta de trabalho temporária: um clone (git init + remote) por repo, lado a lado.
+ * `repos` é uma lista de { name, remote?, project? }; sem remote, o repo é do projeto contoso/Loja.
+ */
+export function makeWorkspace(repos) {
+  const root = mkdtempSync(join(tmpdir(), 'factory-ws-'));
+  const paths = {};
+  for (const { name, remote, project } of repos) {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    const g = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    g('init', '-q');
+    g('config', 'user.email', 'teste@exemplo.com');
+    g('config', 'user.name', 'Teste');
+    g('remote', 'add', 'origin', remote ?? `https://dev.azure.com/contoso/Loja/_git/${name}`);
+    if (project) {
+      mkdirSync(join(dir, '.factory'), { recursive: true });
+      writeFileSync(join(dir, '.factory', 'project.json'), JSON.stringify(project, null, 2));
+    }
+    paths[name] = dir;
+  }
+  return {
+    root,
+    paths,
+    cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }),
+  };
+}
+
+/**
  * fetch simulado. `routes` é uma lista de [método, regex do caminho, handler(req) -> {status, body}].
  * Cada chamada fica registrada em `calls` para as asserções.
  */

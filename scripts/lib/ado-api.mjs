@@ -23,7 +23,36 @@ export async function getProject(cfg) {
 }
 
 export async function getRepo(cfg) {
+  if (!cfg.repo) {
+    throw new FactoryError('config', 'Este comando vale para um repo só, e a sessão está na pasta de trabalho.', 'Passe --repo <nome do repo>, ou rode dentro do clone dele.');
+  }
   return request(cfg, 'GET', `${proj(cfg)}/_apis/git/repositories/${enc(cfg.repo)}`);
+}
+
+export async function listRepos(cfg) {
+  const data = await request(cfg, 'GET', `${proj(cfg)}/_apis/git/repositories`);
+  return data?.value ?? [];
+}
+
+/** Metadados de um arquivo numa branch, ou null se ele não existe lá. */
+export async function getItem(cfg, repoId, path, branch) {
+  try {
+    return await request(cfg, 'GET', `${proj(cfg)}/_apis/git/repositories/${repoId}/items`, {
+      query: { path, 'versionDescriptor.version': branch, 'versionDescriptor.versionType': 'branch', includeContent: false },
+    });
+  } catch (err) {
+    if (err instanceof FactoryError && (err.code === 'not_found' || err.data?.status === 400)) return null;
+    throw err;
+  }
+}
+
+// ---------- sprints ----------
+
+export async function currentIteration(cfg) {
+  const data = await request(cfg, 'GET', `${proj(cfg)}/${enc(cfg.team)}/_apis/work/teamsettings/iterations`, {
+    query: { $timeframe: 'current' },
+  });
+  return data?.value?.[0] ?? null;
 }
 
 export async function getBranch(cfg, repoId, name) {

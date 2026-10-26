@@ -6,10 +6,13 @@
 // Uso: node ado.mjs <grupo> <comando> [--opções]
 //   doctor [--for prd|deliver|release|setup]
 //   whoami
-//   wi show|create|update|search|link|deps|claim|release|state|comment|attach
+//   repos                                  repos do projeto, quais têm a factory, onde está o clone
+//   sprint current
+//   wi show|create|update|search|link|deps|claim|release|state|comment|attach|sprint|task
 //   pr create|status|threads|reply
 //   branch ensure
 //   setup check|apply
+// Na pasta de trabalho (fora de um clone), comandos de um repo só pedem --repo <nome>.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -37,6 +40,8 @@ function typeName(cfg, value) {
   const key = String(value).toLowerCase();
   if (key === 'feature' || key === 'story' || key === 'user story') return cfg.types.feature;
   if (key === 'bug' || key === 'bugfix' || key === 'hotfix') return cfg.types.bug;
+  if (key === 'group') return cfg.types.group;
+  if (key === 'task') return cfg.taskType ?? cfg.types.task;
   return value;
 }
 
@@ -94,7 +99,13 @@ const REL = {
   related: 'System.LinkTypes.Related',
   predecessor: 'System.LinkTypes.Dependency-Reverse',
   parent: 'System.LinkTypes.Hierarchy-Reverse',
+  child: 'System.LinkTypes.Hierarchy-Forward',
 };
+
+/** O repo de um PRD vem da tag `repo:<nome>`; PRD sem a tag é de projeto com um repo só. */
+function repoTag(tags) {
+  return String(tags ?? '').split(';').map((t) => t.trim()).find((t) => t.startsWith('repo:'))?.slice(5) ?? null;
+}
 
 function summarize(cfg, item) {
   const f = item.fields ?? {};
@@ -114,6 +125,10 @@ function summarize(cfg, item) {
     related: byRel(REL.related),
     dependsOn: byRel(REL.predecessor),
     parent: byRel(REL.parent)[0] ?? null,
+    children: byRel(REL.child),
+    repo: repoTag(f['System.Tags']),
+    iteration: f['System.IterationPath'] ?? null,
+    hours: f['Microsoft.VSTS.Scheduling.CompletedWork'] ?? null,
     attachments: relations.filter((r) => r.rel === 'AttachedFile').map((r) => ({ name: r.attributes?.name, url: r.url })),
     pullRequests: relations.filter((r) => r.rel === 'ArtifactLink' && /PullRequestId/i.test(r.url)).map((r) => r.url),
   };
@@ -155,8 +170,9 @@ async function doctor(args) {
 
   let cfg;
   try {
-    cfg = resolveConfig();
-    add('remote', true, `${cfg.org} / ${cfg.project} / ${cfg.repo}`);
+    cfg = resolveConfig({ repoOverride: args.repo && args.repo !== true ? String(args.repo) : null });
+    const where = cfg.repo ?? `pasta de trabalho com ${cfg.workspace.members.length} clone(s): ${cfg.workspace.members.map((m) => m.name).join(', ')}`;
+    add('remote', true, `${cfg.org} / ${cfg.project} / ${where}`);
   } catch (err) {
     add('remote', false, err.message, err.fix);
     return finishDoctor(checks);
@@ -172,22 +188,31 @@ async function doctor(args) {
     return finishDoctor(checks);
   }
 
-  let repo;
+  // Na pasta de trabalho só dá para conferir o projeto; branches, policies e receita são de cada
+  // repo (rode `doctor --repo <nome>` para um deles).
+  let repo = null;
   try {
-    repo = await api.getRepo(cfg);
-    add('project', true, `repo ${repo.name}, branch padrão ${repo.defaultBranch ?? '?'}`);
+    if (cfg.repo) {
+      repo = await api.getRepo(cfg);
+      add('project', true, `repo ${repo.name}, branch padrão ${repo.defaultBranch ?? '?'}`);
+    } else {
+      const project = await api.getProject(cfg);
+      add('project', true, `projeto ${project.name}`);
+    }
   } catch (err) {
     add('project', false, err.message, 'Confira se sua conta tem acesso ao projeto e ao repositório no Azure DevOps.');
     return finishDoctor(checks);
   }
 
-  const mainBranch = String(repo.defaultBranch ?? 'refs/heads/main').replace('refs/heads/', '');
+  const mainBranch = String(repo?.defaultBranch ?? 'refs/heads/main').replace('refs/heads/', '');
   const wanted = [mainBranch, cfg.branches.qa, cfg.branches.develop];
-  const missingBranches = [];
-  for (const name of wanted) {
-    if (!(await api.getBranch(cfg, repo.id, name))) missingBranches.push(name);
+  if (repo) {
+    const missingBranches = [];
+    for (const name of wanted) {
+      if (!(await api.getBranch(cfg, repo.id, name))) missingBranches.push(name);
+    }
+    add('branches', missingBranches.length === 0, missingBranches.length ? `faltam: ${missingBranches.join(', ')}` : wanted.join(', '), 'Rode /setup: ele cria as branches que faltam.');
   }
-  add('branches', missingBranches.length === 0, missingBranches.length ? `faltam: ${missingBranches.join(', ')}` : wanted.join(', '), 'Rode /setup: ele cria as branches que faltam.');
 
   const missingStates = [];
   for (const type of [cfg.types.feature, cfg.types.bug]) {
@@ -202,24 +227,26 @@ async function doctor(args) {
   }
   add('states', missingStates.length === 0, missingStates.length ? `faltam: ${missingStates.join('; ')}` : 'todos os estados existem', 'O admin da organização roda /setup uma vez (ou segue docs/ADMIN.md).');
 
-  try {
-    const types = await api.policyTypes(cfg);
-    const reviewersType = types.find((t) => t.displayName === 'Minimum number of reviewers');
-    const unprotected = [];
-    for (const name of wanted) {
-      const configs = await api.policyConfigurations(cfg, repo.id, `refs/heads/${name}`);
-      if (!configs.some((c) => c.type?.id === reviewersType?.id && c.isEnabled)) unprotected.push(name);
+  if (repo) {
+    try {
+      const types = await api.policyTypes(cfg);
+      const reviewersType = types.find((t) => t.displayName === 'Minimum number of reviewers');
+      const unprotected = [];
+      for (const name of wanted) {
+        const configs = await api.policyConfigurations(cfg, repo.id, `refs/heads/${name}`);
+        if (!configs.some((c) => c.type?.id === reviewersType?.id && c.isEnabled)) unprotected.push(name);
+      }
+      add('policies', unprotected.length === 0, unprotected.length ? `sem aprovação obrigatória: ${unprotected.join(', ')}` : 'aprovação obrigatória nas três branches', 'Rode /setup (com permissão de Project Administrator) para aplicar as policies.');
+    } catch (err) {
+      add('policies', false, err.message, 'Confira as branch policies em Project Settings > Repositories > Policies.');
     }
-    add('policies', unprotected.length === 0, unprotected.length ? `sem aprovação obrigatória: ${unprotected.join(', ')}` : 'aprovação obrigatória nas três branches', 'Rode /setup (com permissão de Project Administrator) para aplicar as policies.');
-  } catch (err) {
-    add('policies', false, err.message, 'Confira as branch policies em Project Settings > Repositories > Policies.');
-  }
 
-  // Projeto sem tela (job, CLI, biblioteca) não tem app para subir: start/ready só com e2e.
-  const recipe = cfg.run ?? {};
-  const needed = ['install', 'test', ...(recipe.e2e ? ['start', 'ready'] : [])];
-  const missingRecipe = needed.filter((k) => !recipe[k]);
-  add('recipe', missingRecipe.length === 0, missingRecipe.length ? `faltam em .factory/project.json: ${missingRecipe.join(', ')}` : 'receita de execução completa', 'Rode /setup para descobrir e provar a receita de execução.');
+    // Repo sem tela (job, CLI, biblioteca) não tem app para subir: start/ready só com e2e.
+    const recipe = cfg.run ?? {};
+    const needed = ['install', 'test', ...(recipe.e2e ? ['start', 'ready'] : [])];
+    const missingRecipe = needed.filter((k) => !recipe[k]);
+    add('recipe', missingRecipe.length === 0, missingRecipe.length ? `faltam em .factory/project.json: ${missingRecipe.join(', ')}` : 'receita de execução completa', 'Rode /setup para descobrir e provar a receita de execução.');
+  }
 
   const skew = clockSkewSeconds();
   if (skew !== null) {
@@ -328,10 +355,11 @@ async function wiSearch(cfg, args) {
   }
   if (args.tag && args.tag !== true) clauses.push(`[System.Tags] CONTAINS ${wiqlString(args.tag)}`);
   if (args.mine) clauses.push('[System.AssignedTo] = @me');
+  if (args.parent && args.parent !== true) clauses.push(`[System.Parent] = ${toId(args.parent, 'parent')}`);
   const query = `SELECT [System.Id] FROM WorkItems WHERE ${clauses.join(' AND ')} ORDER BY [Microsoft.VSTS.Common.StackRank] ASC, [System.Id] ASC`;
   const top = Number(args.top ?? 20);
   const ids = (await api.wiql(cfg, query, top)).slice(0, top);
-  const fields = ['System.Id', 'System.Title', 'System.State', 'System.WorkItemType', 'System.AssignedTo', 'System.Tags'];
+  const fields = ['System.Id', 'System.Title', 'System.State', 'System.WorkItemType', 'System.AssignedTo', 'System.Tags', 'System.Parent'];
   const items = await api.getWorkItems(cfg, ids, fields);
   const byId = new Map(items.map((i) => [i.id, i]));
   const prefix = args['tag-prefix'] && args['tag-prefix'] !== true ? String(args['tag-prefix']) : null;
@@ -348,6 +376,8 @@ async function wiSearch(cfg, args) {
         state: i.fields['System.State'],
         assignedTo: i.fields['System.AssignedTo']?.uniqueName ?? null,
         tags: i.fields['System.Tags'] ?? '',
+        repo: repoTag(i.fields['System.Tags']),
+        parent: i.fields['System.Parent'] ?? null,
         url: workItemUrl(cfg, i.id),
       })),
   };
@@ -361,9 +391,15 @@ async function wiLink(cfg, args) {
   const wanted = [
     ...splitIds(args.related).map((t) => [REL.related, t]),
     ...splitIds(args['depends-on']).map((t) => [REL.predecessor, t]),
+    ...splitIds(args.parent).map((t) => [REL.parent, t]),
   ];
-  if (!wanted.length) throw new FactoryError('config', 'Nada para linkar.', 'Passe --related <id> ou --depends-on <id>.');
+  if (!wanted.length) throw new FactoryError('config', 'Nada para linkar.', 'Passe --related <id>, --depends-on <id> ou --parent <id>.');
+  const parentNow = relations.find((r) => r.rel === REL.parent);
   for (const [rel, target] of wanted) {
+    // Um item só tem um pai: trocar de pai é decisão de gente, não do script.
+    if (rel === REL.parent && parentNow && idFromUrl(parentNow.url) !== target) {
+      throw new FactoryError('conflict', `O item #${id} já é filho de #${idFromUrl(parentNow.url)}.`, 'Mude o pai no board, se for o caso, e rode de novo.');
+    }
     if (!relations.some((r) => r.rel === rel && idFromUrl(r.url) === target)) ops.push(relationOp(cfg, rel, target));
   }
   if (!ops.length) return { changed: false, item: summarize(cfg, item) };
@@ -459,6 +495,113 @@ async function wiAttach(cfg, args) {
     { op: 'add', path: '/relations/-', value: { rel: 'AttachedFile', url: upload.url, attributes: { name, comment: 'factory' } } },
   ]);
   return { attached: true, name, url: upload.url };
+}
+
+// ---------- repos da pasta de trabalho ----------
+
+/** Os repos do projeto, quais já têm a factory (project.json na develop) e onde está o clone local. */
+async function reposList(cfg) {
+  const repos = await api.listRepos(cfg);
+  const members = cfg.workspace.members;
+  const out = [];
+  for (const r of repos) {
+    if (r.isDisabled) continue;
+    const item = await api.getItem(cfg, r.id, '/.factory/project.json', cfg.branches.develop);
+    const local = members.find((m) => m.name.toLowerCase() === r.name.toLowerCase());
+    out.push({
+      name: r.name,
+      factory: Boolean(item),
+      defaultBranch: String(r.defaultBranch ?? '').replace('refs/heads/', '') || null,
+      local: local?.path ?? null,
+      remoteUrl: r.remoteUrl,
+    });
+  }
+  return { workspace: cfg.workspace.root, repos: out.sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
+// ---------- sprints e tasks ----------
+
+async function sprintCurrent(cfg) {
+  const it = await api.currentIteration(cfg);
+  if (!it) return { sprint: null, note: `O time "${cfg.team}" não tem sprint atual.` };
+  return { sprint: { name: it.name, path: it.path, start: it.attributes?.startDate ?? null, finish: it.attributes?.finishDate ?? null } };
+}
+
+async function currentSprintPath(cfg) {
+  try {
+    return (await api.currentIteration(cfg))?.path ?? null;
+  } catch (err) {
+    if (err instanceof FactoryError && err.code === 'not_found') return null;
+    throw err;
+  }
+}
+
+/** Põe o item na sprint atual do time, se ele ainda não está nela. */
+async function wiSprint(cfg, args) {
+  const id = toId(required(args, 'id'));
+  const path = await currentSprintPath(cfg);
+  if (!path) return { changed: false, note: `O time "${cfg.team}" não tem sprint atual; o item fica onde está.` };
+  const item = summarize(cfg, await api.getWorkItem(cfg, id));
+  if (item.iteration === path) return { changed: false, sprint: path };
+  await api.updateWorkItem(cfg, id, [{ op: 'add', path: '/fields/System.IterationPath', value: path }]);
+  return { changed: true, sprint: path };
+}
+
+function parseHours(value) {
+  if (value === undefined || value === true) return null;
+  const n = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(n) || n < 0) throw new FactoryError('config', `--hours precisa ser um número de horas (recebi "${value}").`);
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Task de horas de um PRD (a do PO e a do dev). Identidade pela chave (`--key po-1234`): rodar de
+ * novo atualiza a mesma task. Nasce na sprint atual, filha do PRD. As horas são sempre as que a
+ * pessoa declarou; o tempo de máquina nunca vai para cá.
+ */
+async function wiTask(cfg, args) {
+  const parentId = toId(required(args, 'id'));
+  const key = `task-${required(args, 'key')}`;
+  const hours = parseHours(args.hours);
+  const state = args.state && args.state !== true ? cfg.taskStates[String(args.state).toLowerCase()] ?? String(args.state) : null;
+  const closing = state === cfg.taskStates.closed;
+  const assignee = args.assign === 'me' ? (await api.me(cfg)).email : args.assign && args.assign !== true ? String(args.assign) : null;
+
+  const wanted = {};
+  if (hours !== null) wanted['Microsoft.VSTS.Scheduling.CompletedWork'] = hours;
+  if (closing) wanted['Microsoft.VSTS.Scheduling.RemainingWork'] = 0;
+  if (assignee) wanted['System.AssignedTo'] = assignee;
+  const fieldOps = Object.entries(wanted).map(([field, value]) => ({ op: 'add', path: `/fields/${field}`, value }));
+
+  const existing = await findByKey(cfg, key);
+  if (existing) {
+    const raw = await api.getWorkItem(cfg, existing);
+    const current = summarize(cfg, raw);
+    const now = (field) => (field === 'System.AssignedTo' ? current.assignedTo : raw.fields?.[field]);
+    const same = (a, b) => a !== undefined && a !== null && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    const ops = fieldOps.filter((op) => !same(now(op.path.slice('/fields/'.length)), op.value));
+    if (state && state !== current.state) ops.push({ op: 'add', path: '/fields/System.State', value: state });
+    if (!ops.length) return { created: false, updated: false, task: current };
+    return { created: false, updated: true, task: summarize(cfg, await api.updateWorkItem(cfg, existing, ops)) };
+  }
+
+  const title = required(args, 'title');
+  const type = args.type && args.type !== true ? String(args.type) : cfg.taskType ?? cfg.types.task;
+  const parent = await api.getWorkItem(cfg, parentId);
+  const iteration = (await currentSprintPath(cfg)) ?? parent.fields?.['System.IterationPath'];
+  const ops = [
+    { op: 'add', path: '/fields/System.Title', value: title },
+    { op: 'add', path: '/fields/System.Tags', value: `factory-key:${key}` },
+    ...(parent.fields?.['System.AreaPath'] ? [{ op: 'add', path: '/fields/System.AreaPath', value: parent.fields['System.AreaPath'] }] : []),
+    ...(iteration ? [{ op: 'add', path: '/fields/System.IterationPath', value: iteration }] : []),
+    ...fieldOps,
+    relationOp(cfg, REL.parent, parentId),
+  ];
+  let task = await api.createWorkItem(cfg, type, ops);
+  if (state && state !== task.fields?.['System.State']) {
+    task = await api.updateWorkItem(cfg, task.id, [{ op: 'add', path: '/fields/System.State', value: state }]);
+  }
+  return { created: true, task: summarize(cfg, task) };
 }
 
 // ---------- pull requests ----------
@@ -768,7 +911,11 @@ async function setupApply(cfg, args) {
 const COMMANDS = {
   doctor: { _: (_cfg, args) => doctor(args), noConfig: true },
   whoami: { _: async (cfg) => ({ user: await api.me(cfg) }) },
+  repos: { _: (cfg) => reposList(cfg) },
+  sprint: { current: sprintCurrent },
   wi: {
+    sprint: wiSprint,
+    task: wiTask,
     show: wiShow,
     create: wiCreate,
     update: wiUpdate,
@@ -791,17 +938,18 @@ export async function dispatch(argv) {
   const [group, action] = args._;
   const entry = COMMANDS[group];
   if (!entry) {
-    throw new FactoryError('config', `Comando desconhecido: "${group ?? ''}".`, 'Use: doctor, whoami, wi, pr, branch ou setup.');
+    throw new FactoryError('config', `Comando desconhecido: "${group ?? ''}".`, 'Use: doctor, whoami, repos, sprint, wi, pr, branch ou setup.');
   }
+  const repoOverride = args.repo && args.repo !== true ? String(args.repo) : null;
   if (entry._) {
-    const cfg = entry.noConfig ? null : resolveConfig();
+    const cfg = entry.noConfig ? null : resolveConfig({ repoOverride });
     return entry._(cfg, args);
   }
   const handler = entry[action];
   if (!handler) {
     throw new FactoryError('config', `Ação desconhecida para "${group}": "${action ?? ''}".`, `Use: ${Object.keys(entry).join(', ')}.`);
   }
-  return handler(resolveConfig(), args);
+  return handler(resolveConfig({ repoOverride }), args);
 }
 
 if (isEntryPoint(import.meta.url)) run(() => dispatch(process.argv.slice(2)));

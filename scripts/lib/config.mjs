@@ -1,9 +1,13 @@
 // Configuração do projeto: o que dá para derivar (git remote) mais o pouco que fica em
 // .factory/project.json (a receita de execução e, raramente, overrides).
+//
+// Um projeto pode ter 1 ou N repos. A "pasta de trabalho" é a pasta que reúne um clone de cada:
+// rodando dentro de um repo, ela é a pasta-mãe (só os clones do mesmo projeto contam); rodando
+// fora de um repo, é a própria pasta.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { FactoryError } from './cli.mjs';
 
 export const DEFAULT_STATES = {
@@ -17,20 +21,28 @@ export const DEFAULT_STATES = {
   removed: 'Removed',
 };
 
-export const DEFAULT_TYPES = { feature: 'User Story', bug: 'Bug' };
+export const DEFAULT_TYPES = { feature: 'User Story', bug: 'Bug', group: 'Feature', task: 'Task' };
+
+export const DEFAULT_TASK_STATES = { new: 'New', active: 'Active', closed: 'Closed' };
 
 export const DEFAULT_BRANCHES = { develop: 'develop', qa: 'QA' };
 
 export function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
+}
+
+function repoRootOf(dir) {
+  try {
+    return git(['rev-parse', '--show-toplevel'], dir);
+  } catch {
+    return null;
+  }
 }
 
 export function gitRoot(cwd = process.cwd()) {
-  try {
-    return git(['rev-parse', '--show-toplevel'], cwd);
-  } catch {
-    throw new FactoryError('config', 'Esta pasta não é um repositório git.', 'Rode o comando dentro do clone do projeto.');
-  }
+  const root = repoRootOf(cwd);
+  if (!root) throw new FactoryError('config', 'Esta pasta não é um repositório git.', 'Rode o comando dentro do clone do projeto, ou na pasta que reúne os clones.');
+  return root;
 }
 
 /** Extrai org, projeto e repo de uma URL de remote do Azure DevOps. */
@@ -57,6 +69,60 @@ export function parseRemote(url) {
   return null;
 }
 
+function remoteOf(dir) {
+  try {
+    return parseRemote(git(['remote', 'get-url', 'origin'], dir));
+  } catch {
+    return null;
+  }
+}
+
+const sameProject = (a, b) => a && b && a.org.toLowerCase() === b.org.toLowerCase() && a.project.toLowerCase() === b.project.toLowerCase();
+
+/**
+ * Os clones do projeto lado a lado. Dentro de um repo: ele e os irmãos do mesmo projeto. Fora de
+ * um repo: os clones dentro da pasta, que precisam ser todos do mesmo projeto.
+ */
+export function findWorkspace(cwd = process.cwd()) {
+  const repoRoot = repoRootOf(cwd);
+  const base = repoRoot ? dirname(repoRoot) : resolve(cwd);
+  const anchor = repoRoot ? remoteOf(repoRoot) : null;
+  const found = [];
+  let entries = [];
+  try {
+    entries = readdirSync(base, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(base, entry.name);
+    if (!existsSync(join(dir, '.git'))) continue;
+    const remote = remoteOf(dir);
+    if (remote) found.push({ name: remote.repo, path: dir, org: remote.org, project: remote.project });
+  }
+  if (repoRoot && anchor && !found.some((m) => resolve(m.path) === resolve(repoRoot))) {
+    found.push({ name: anchor.repo, path: repoRoot, org: anchor.org, project: anchor.project });
+  }
+  let members = anchor ? found.filter((m) => sameProject(m, anchor)) : found;
+  if (!anchor && members.length) {
+    const projects = [...new Set(members.map((m) => `${m.org}/${m.project}`.toLowerCase()))];
+    if (projects.length > 1) {
+      throw new FactoryError(
+        'config',
+        `A pasta reúne clones de mais de um projeto do Azure DevOps (${projects.join(', ')}).`,
+        'Abra a sessão na pasta que reúne só os clones de um projeto, ou dentro de um dos clones.',
+      );
+    }
+  }
+  members = members.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    root: base,
+    members,
+    current: repoRoot ? members.find((m) => resolve(m.path) === resolve(repoRoot)) ?? null : null,
+  };
+}
+
 function parseProjectJson(text, where) {
   try {
     return JSON.parse(text);
@@ -78,7 +144,7 @@ export function loadProjectFile(root) {
     const text = git(['show', 'origin/develop:.factory/project.json'], root);
     if (text) return { file, exists: true, source: 'origin/develop', data: parseProjectJson(text, 'origin/develop:.factory/project.json') };
   } catch {
-    // sem develop no origin ou sem o arquivo nela: projeto ainda não configurado
+    // sem develop no origin ou sem o arquivo nela: repo ainda não configurado
   }
   return { file, exists: false, source: null, data: {} };
 }
@@ -95,28 +161,51 @@ export function recipeForPlatform(run, platform = process.platform) {
 }
 
 /**
- * Monta a configuração efetiva. Org/projeto/repo vêm do remote `origin`; o project.json
- * só sobrescreve quando o remote não é do Azure DevOps ou o time quer outro nome.
+ * Monta a configuração efetiva.
+ * - Dentro de um repo: org/projeto/repo vêm do remote `origin` (o project.json só sobrescreve).
+ * - Na pasta de trabalho (fora de um repo): org/projeto vêm dos clones; `repo` é o que veio em
+ *   `repoOverride` (--repo) ou nenhum, e comandos de um repo só pedem `--repo`.
+ * - `repoOverride` dentro de um repo aponta para um irmão da pasta de trabalho.
  */
-export function resolveConfig({ cwd = process.cwd(), requireAdo = true } = {}) {
-  const root = gitRoot(cwd);
-  const project = loadProjectFile(root);
-  const data = project.data;
+export function resolveConfig({ cwd = process.cwd(), requireAdo = true, repoOverride = null } = {}) {
+  let root = repoRootOf(cwd);
+  let workspace = null;
+  const getWorkspace = () => (workspace ??= findWorkspace(cwd));
 
-  let remoteUrl = '';
-  try {
-    remoteUrl = git(['remote', 'get-url', 'origin'], root);
-  } catch {
-    remoteUrl = '';
+  if (repoOverride) {
+    const member = getWorkspace().members.find((m) => m.name.toLowerCase() === String(repoOverride).toLowerCase());
+    if (!member) {
+      throw new FactoryError('config', `Não achei um clone do repo "${repoOverride}" na pasta de trabalho.`, 'Clone o repo ao lado dos outros (o /setup faz isso) e rode de novo.');
+    }
+    root = member.path;
   }
-  const fromRemote = parseRemote(remoteUrl) ?? {};
+
+  let remote = root ? remoteOf(root) : null;
+  let workspaceMode = false;
+  if (!root) {
+    const ws = getWorkspace();
+    if (!ws.members.length) gitRoot(cwd);
+    workspaceMode = true;
+    remote = { org: ws.members[0].org, project: ws.members[0].project, repo: null };
+  }
+
+  const project = root ? loadProjectFile(root) : { file: null, exists: false, source: null, data: {} };
+  const data = project.data;
+  let remoteUrl = '';
+  if (root) {
+    try {
+      remoteUrl = git(['remote', 'get-url', 'origin'], root);
+    } catch {
+      remoteUrl = '';
+    }
+  }
   const ado = {
-    org: data.ado?.organization ?? fromRemote.org,
-    project: data.ado?.project ?? fromRemote.project,
-    repo: data.ado?.repository ?? fromRemote.repo,
+    org: data.ado?.organization ?? remote?.org,
+    project: data.ado?.project ?? remote?.project,
+    repo: data.ado?.repository ?? remote?.repo ?? null,
   };
 
-  if (requireAdo && (!ado.org || !ado.project || !ado.repo)) {
+  if (requireAdo && (!ado.org || !ado.project || (!workspaceMode && !ado.repo))) {
     throw new FactoryError(
       'config',
       `Não consegui descobrir organização, projeto e repo do Azure DevOps (remote origin: "${remoteUrl || 'nenhum'}").`,
@@ -124,8 +213,13 @@ export function resolveConfig({ cwd = process.cwd(), requireAdo = true } = {}) {
     );
   }
 
+  const baseDir = root ?? resolve(cwd);
   return {
-    root,
+    root: baseDir,
+    workspaceMode,
+    get workspace() {
+      return getWorkspace();
+    },
     remoteUrl,
     projectFile: project.file,
     projectFileExists: project.exists,
@@ -134,12 +228,15 @@ export function resolveConfig({ cwd = process.cwd(), requireAdo = true } = {}) {
     project: ado.project,
     repo: ado.repo,
     orgUrl: ado.org ? `https://dev.azure.com/${encodeURIComponent(ado.org)}` : null,
+    team: data.ado?.team ?? (ado.project ? `${ado.project} Team` : null),
+    taskType: data.ado?.taskType ?? null,
     branches: { ...DEFAULT_BRANCHES, ...(data.branches ?? {}) },
     types: { ...DEFAULT_TYPES, ...(data.types ?? {}) },
     states: { ...DEFAULT_STATES, ...(data.states ?? {}) },
+    taskStates: { ...DEFAULT_TASK_STATES, ...(data.taskStates ?? {}) },
     buildDefinitionId: data.ado?.buildDefinitionId ?? null,
     run: recipeForPlatform(data.run),
     maxAttempts: Number(data.maxAttempts ?? 3),
-    runsDir: join(root, '.factory', 'runs'),
+    runsDir: join(baseDir, '.factory', 'runs'),
   };
 }
