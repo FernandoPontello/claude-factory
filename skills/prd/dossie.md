@@ -1,6 +1,12 @@
 # <título do item>
 
-Tipo: Feature | Bug · Tamanho: P | M | G
+Tipo: Feature | Bug · Repo: <nome do repo> · Tamanho: P | M | G
+
+<!--
+Ideia que toca mais de um repo: a Feature (a ideia do PO) leva só as seções 1, 2 e 5, e cada PRD
+filho leva o modelo inteiro, com os ACs e a leitura técnica do repo dele e a seção 8.
+Ideia de um repo só: um PRD com o modelo inteiro, sem a seção 8.
+-->
 
 ## 1. Problema e valor
 
@@ -14,7 +20,8 @@ Como <persona>, quero <ação>, para <benefício>.
 
 ## 3. Critérios de aceite
 
-Cada AC vira um teste de aceite. O "então" precisa ser observável na tela, na API ou nos dados.
+Cada AC vira um teste de aceite. O "então" precisa ser observável na fronteira deste repo: na
+API, a resposta e os dados; no front, a tela.
 
 - **AC-1 (US-1) — <título>**
   Dado <estado inicial>, quando <ação>, então <resultado observável>.
@@ -45,7 +52,17 @@ O que este item explicitamente não cobre.
 
 Escrita pelo Claude na sessão do PO. Não é decisão: serve para dimensionar e acelerar o dev.
 
-- **Onde mexe:** módulos e arquivos prováveis
+- **Onde mexe:** módulos e arquivos prováveis deste repo
 - **Abordagem provável:** e as alternativas
 - **Riscos e dependências:** inclusive conflitos com o comportamento atual
 - **Perguntas técnicas em aberto:** vão para o kickoff do dev
+
+## 8. Contrato entre repos (só com mais de um repo)
+
+O mesmo texto nos PRDs dos dois lados. A API **oferece**; o front **consome**. O dev da API pode
+ajustar o contrato no kickoff; se ajustar, atualiza este bloco nos dois PRDs.
+
+- **<MÉTODO> <rota>** — para que serve
+  - **Envia:** campos, tipos, obrigatórios
+  - **Recebe:** campos, tipos, exemplo curto
+  - **Erros:** código, quando acontece, mensagem que o front mostra
