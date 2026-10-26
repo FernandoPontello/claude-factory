@@ -74,9 +74,9 @@ Os dois respondem em JSON. `ok: false` traz `error` e `fix`.
    (confira com `git log`/`git grep` em `origin/<base>`), diga isso ao dev no kickoff, antes de
    começar.
 5. `ado wi deps --id <id>`. Se `blocked` não estiver vazio, diga o que bloqueia e pare. É assim que
-   o front espera a API: o PRD do front depende do PRD da API e só começa com ele Integrado.
+   o front espera a API: o PRD do front depende do PRD da API e só começa com ele Integrated.
 6. `ado wi claim --id <id>`. Conflito (código 4) = outra pessoa está com o item: diga e pare.
-   Item em Executando ou Revisao com você volta `resumed: true` sem escrever nada: é a retomada
+   Item em Executing ou Reviewing com você volta `resumed: true` sem escrever nada: é a retomada
    (sessão nova, ou "trata os comentários da PR").
 7. `ado wi sprint --id <id>`: o item entra na sprint atual do time (sem sprint atual, fica onde
    está).
@@ -205,7 +205,7 @@ Se o `run check` devolver `limit`, pare a fase 2 e vá para o relatório com o q
 2. `ado wi attach --id <id> --file .factory/runs/<id>/relatorio-v<N>.html --name relatorio-<id>-v<N>.html`
 3. `ado wi comment --id <id> --marker relatorio-v<N> --file .factory/runs/<id>/pr-summary.md`
 4. `ado wi state --id <id> --to review`, **antes** das PRs: se uma PR completar na hora, o merge
-   já encontra o item em Revisao e o leva adiante. Com quebra de compatibilidade, rode também
+   já encontra o item em Reviewing e o leva adiante. Com quebra de compatibilidade, rode também
    `ado wi update --id <id> --add-tags breaking`.
 5. **PRs**, na ordem de `state.prs`:
    - **PR principal:**
@@ -241,7 +241,7 @@ Se o `run check` devolver `limit`, pare a fase 2 e vá para o relatório com o q
 11. Diga ao dev:
     - os links das PRs;
     - que a aprovação é no Azure DevOps;
-    - que o item muda de estado sozinho no merge: Integrado (develop), Homologando (QA) ou Closed
+    - que o item muda de estado sozinho no merge: Integrated (develop), Validating (QA) ou Closed
       (main).
 
 ## Depois da PR: "trata os comentários da PR"

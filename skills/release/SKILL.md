@@ -49,15 +49,15 @@ de um repo só levam `--repo <nome>` e o git roda com `git -C "<clone>"`.
    `Revert "..."` citando o mesmo `#id`) não sobe.
 5. Para cada ID: `ado wi show --id <id>` (estado, título, repo e `parent`, a Feature). Cada
    degrau só leva os itens no estado esperado:
-   - **develop → QA:** só os que estão em **Integrado**;
-   - **QA → main:** só os que estão em **Homologando**.
+   - **develop → QA:** só os que estão em **Integrated**;
+   - **QA → main:** só os que estão em **Validating**.
 
    Os demais aparecem numa lista à parte, "já entregues por bugfix ou hotfix", e **nunca entram
    no `--wi`**. Um bugfix trazido de volta pelo back-merge aparece no intervalo da develop, mas já
-   está em Homologando ou Closed; linkar de novo faria o item voltar de estado.
+   está em Validating ou Closed; linkar de novo faria o item voltar de estado.
 6. **Feature pela metade.** Para cada Feature dos itens do degrau, `ado wi search --parent <feature>`
-   lista todos os PRDs dela. Se algum PRD da Feature não está no degrau (o front ainda em
-   Executando enquanto a API está Integrada, por exemplo), mostre:
+   lista todos os PRDs dela. Se algum PRD da Feature não está no degrau (o front ainda
+   em Executing enquanto a API está em Integrated, por exemplo), mostre:
    "Feature #<id> pela metade: sobe <repo e PRD>, fica <repo, PRD e estado>". O PO decide se sobe
    assim (a parte que sobe precisa funcionar sozinha) ou se espera.
 7. Monte a lista **agrupada por Feature** (itens sem Feature ficam num grupo à parte), com as
@@ -66,7 +66,7 @@ de um repo só levam `--repo <nome>` e o git roda com `git -C "<clone>"`.
 
 ## 2. Promoção para a QA (`/release qa`)
 
-1. A lista é a dos itens em Integrado (seção 1).
+1. A lista é a dos itens em Integrated (seção 1).
    - Item que o PO não quer subir é revertido na develop antes, pelo botão **Revert** da PR
      completada no Azure DevOps. Com squash, cada PRD é um commit só.
    - Depois do revert, rode a seção 1 de novo.
@@ -77,12 +77,12 @@ de um repo só levam `--repo <nome>` e o git roda com `git -C "<clone>"`.
 4. Diga ao PO:
    - que cada PR precisa de aprovação no Azure DevOps;
    - que, com mais de um repo, a API entra antes do front (aprove nessa ordem);
-   - que, no merge, os itens vão sozinhos para Homologando;
+   - que, no merge, os itens vão sozinhos para Validating;
    - que ele valida na QA com o roteiro de validação de cada relatório, anexado ao item.
 
 ## 3. Release para produção (`/release prod`)
 
-1. A lista é a dos itens em Homologando (seção 1). Pergunte explicitamente:
+1. A lista é a dos itens em Validating (seção 1). Pergunte explicitamente:
    **"Todos estes itens foram validados na QA?"** Item com problema vira bugfix pelo `/prd`
    antes do release.
 2. **Versão sugerida**, a partir da maior tag `vX.Y.Z` entre os repos (sem tag, comece em

@@ -29,7 +29,7 @@ conduz a visão do produto e o primeiro PRD é a fundação.
 1. **PO:** `/prd`. O Claude lê o código da `develop` de cada repo, confronta a ideia com o que o
    sistema faz hoje e monta o dossiê. Os critérios de aceite vêm em Dado/Quando/Então, junto com
    uma leitura técnica preliminar. Com o OK do PO, o item vai para **Ready**.
-2. **Dev:** `/deliver`. O Claude reserva o item (**Executando**), põe na sprint atual, cria a
+2. **Dev:** `/deliver`. O Claude reserva o item (**Executing**), põe na sprint atual, cria a
    branch e faz o **kickoff**: o plano e as perguntas técnicas, cada uma com uma recomendação.
 3. **Execução:** o Claude trabalha sozinho, sem parar para perguntar:
    - escreve os testes de aceite primeiro;
@@ -38,11 +38,11 @@ conduz a visão do produto e o primeiro PRD é a fundação.
    - revisa por cinco lentes e atualiza `docs/system`.
 4. **Relatório:** uma parte para o PO (ACs com prints e roteiro de validação) e outra para o dev
    (decisões, mudanças, qualidade). O dev aprova ou pede ajustes no chat.
-5. **Entrega:** push, relatório anexado ao item, PR no Azure DevOps (**Revisao**), mais os
+5. **Entrega:** push, relatório anexado ao item, PR no Azure DevOps (**Reviewing**), mais os
    back-merges quando a trilha pede.
 6. **Merge:** alguém do time aprova no Azure DevOps. O item muda de estado sozinho:
-   - **Integrado** no merge na develop;
-   - **Homologando** no merge na QA;
+   - **Integrated** no merge na develop;
+   - **Validating** no merge na QA;
    - **Closed** no merge na main.
 7. **QA e produção:** o PO roda `/release`, que promove para a QA. O PO valida e roda `/release`
    de novo para a main. Depois do merge, mais um `/release` cria a tag.
@@ -62,7 +62,7 @@ C:\Projetos\Loja\           ← pasta de trabalho (não é repo)
   grava a Feature (a ideia do PO) e um PRD filho para cada repo, com a tag `repo:<nome>` e a
   seção "Contrato entre repos" (o que a API oferece e o front consome).
 - **A API vem antes.** O PRD do front depende do PRD da API: o `/deliver` do front só começa
-  com a API Integrada.
+  com a API em Integrated.
 - **O front testa contra a API de verdade.** A receita do front lista a API em `services`; nos
   testes de aceite, o `/deliver` sobe a API da develop numa cópia limpa e numa porta própria, e o
   relatório diz contra qual commit testou.
@@ -98,10 +98,14 @@ alguém.
 
 ## Estados no board
 
-`New → Ready → Executando → Revisao → Integrado → Homologando → Closed` (e `Removed`).
+`New → Ready → Executing → Reviewing → Integrated → Validating → Closed` (e `Removed`).
 
-O agente só move Ready, Executando e Revisao. Integrado, Homologando e Closed acontecem no merge,
-porque a descrição de cada PR traz o estado antes do ID (`Integrado #1234`).
+O agente só move Ready, Executing e Reviewing. Integrated, Validating e Closed acontecem no merge,
+porque a descrição de cada PR traz o estado antes do ID (`Integrated #1234`).
+
+Os nomes são em inglês, a pedido do admin da organização. No board de cada time, as colunas são
+Draft, Ready for Dev, In Progress, In Review, Integrated, In QA e Done
+([docs/ADMIN.md](docs/ADMIN.md)).
 
 ## Princípios
 

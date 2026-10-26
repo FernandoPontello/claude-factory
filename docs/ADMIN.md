@@ -12,11 +12,14 @@ Organization settings → Boards → Process: veja qual processo o projeto usa e
 usam o mesmo.
 
 - **Processo de sistema** (Agile, Scrum, CMMI): não aceita estados. Crie um herdado (seção 1.1).
-- **Processo herdado só deste projeto**, ou de projetos que todos usam a factory: acrescente os
-  estados nele (seção 1.2).
-- **Processo herdado compartilhado com projetos que não usam a factory:** não mexa nele, porque
-  os estados novos apareceriam nos outros projetos. Crie um processo próprio para o projeto com
-  as mesmas customizações (seção 1.1) e acrescente os estados nele.
+- **Processo herdado só deste projeto:** acrescente os estados nele (seção 1.2).
+- **Processo herdado compartilhado com outros projetos:** a decisão é do admin.
+  - **Estados para todos os projetos do processo**, mesmo os que ainda não usam a factory: eles
+    aparecem nas listas de estado, mas nenhum item muda, e cada time só cria as colunas quando
+    adotar a factory. Acrescente os estados no próprio processo (seção 1.2). Pelo script, isso
+    pede `ado setup apply --only states --shared`: sem o `--shared`, ele se recusa.
+  - **Só este projeto:** crie um processo próprio com as mesmas customizações (seção 1.1) e
+    acrescente os estados nele.
 
 ### 1.1 Processo novo
 
@@ -31,22 +34,24 @@ usam o mesmo.
 
 ### 1.2 Estados da factory
 
-Em **User Story** e em **Bug** → States, crie:
+Em **User Story** e em **Bug** → States, crie, com os nomes exatos:
 
-| Estado | Categoria |
-| --- | --- |
-| Ready | Proposed |
-| Executando | In progress |
-| Revisao | In progress |
-| Integrado | In progress |
-| Homologando | In progress |
+| Estado | Categoria | Cor | Quando o item chega nele |
+| --- | --- | --- | --- |
+| Ready | Proposed | `B2B2B2` | o PO aprovou o PRD |
+| Executing | In Progress | `007ACC` | um dev pegou o item |
+| Reviewing | In Progress | `FF9D00` | a PR foi aberta |
+| Integrated | In Progress | `5688E0` | a PR entrou na develop |
+| Validating | In Progress | `773B93` | entrou na QA, e o PO está validando |
 
 - New, Closed e Removed já existem.
 - Active e Resolved só podem ser ocultados quando nenhum item estiver neles.
-- Os nomes são de uma palavra e sem acento de propósito: a descrição da PR usa
-  `<Estado> #<id>` para mover o item no merge.
-- Integrado e Homologando ficam em "In progress" de propósito, porque o Azure DevOps não leva
+- Os nomes são em inglês, a pedido do admin da organização, e de uma palavra só de propósito: a
+  descrição da PR usa `<Estado> #<id>` para mover o item no merge.
+- Integrated e Validating ficam em "In Progress" de propósito, porque o Azure DevOps não leva
   a Closed um item que está em Resolved.
+- Projeto que precise de outros nomes grava a troca em `"states"` no `.factory/project.json`
+  (por exemplo `"review": "Revision"`).
 - A **Feature** (que reúne os PRDs de uma ideia que toca mais de um repo) não ganha estados: a
   factory não mexe nela.
 
@@ -86,18 +91,23 @@ Boards → Board → configurações → Columns, no board de histórias. Mapeie
 coluna, com o nome que as pessoas leem. Estado sem coluna some do board, e os itens nele ficam
 invisíveis ali.
 
-| Coluna | Estado |
-| --- | --- |
-| Rascunho | New |
-| Pronto para dev | Ready |
-| Em execução | Executando |
-| Em revisão | Revisao |
-| Integrado | Integrado |
-| Em homologação | Homologando |
-| Concluído | Closed |
+Com os bugs no board, cada coluna mapeia o estado da User Story e o do Bug:
 
-Se o time quiser marcar o que o PO já validou, divida a coluna "Em homologação" em fazendo e
-feito. O PO arrasta o item ao validar. A factory não lê essa divisão.
+| Coluna | Estado (User Story e Bug) |
+| --- | --- |
+| Draft | New |
+| Ready for Dev | Ready |
+| In Progress | Executing |
+| In Review | Reviewing |
+| Integrated | Integrated |
+| In QA | Validating |
+| Done | Closed |
+
+Projeto que já tem itens em Active ou Resolved ganha uma coluna para cada, como "Active (legacy)"
+e "Resolved (legacy)", até o time esvaziá-las.
+
+Se o time quiser marcar o que o PO já validou, divida a coluna "In QA" em Doing e Done. O PO
+arrasta o item ao validar. A factory não lê essa divisão.
 
 O board de Features continua do jeito do time: confira só que todo estado de Feature em uso tem
 coluna, para nenhuma ideia sumir.
@@ -136,10 +146,10 @@ autoaprovação ali.
 Depois de criar os estados, confirme que o merge move o item:
 
 1. Crie um item de teste em Ready e uma branch `teste/factory` com um commit qualquer.
-2. Abra uma PR para a develop com `Integrado #<id>` na descrição, linkada ao item, e complete-a
+2. Abra uma PR para a develop com `Integrated #<id>` na descrição, linkada ao item, e complete-a
    com "Complete linked work items after merging" ligado.
-3. Confira se o item foi para **Integrado**.
-4. Repita com uma PR para a QA (`Homologando #<id>`) e depois para a main (`Closed #<id>`).
+3. Confira se o item foi para **Integrated**.
+4. Repita com uma PR para a QA (`Validating #<id>`) e depois para a main (`Closed #<id>`).
 5. Apague a branch e o item de teste.
 
 Se alguma transição não acontecer, anote qual e o que o item mostrou no histórico. Essa é a

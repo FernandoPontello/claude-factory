@@ -171,7 +171,7 @@ Em qualquer caso:
 - Para editar um item ainda em New ou Ready: `ado wi update --id <id> --description-file ...`.
   Mudou o contrato? Atualize os dois PRDs.
 - Ao fim, mostre o link de cada item criado e diga ao PO que o dev já pode puxar do board. Com
-  mais de um repo, diga que o front só começa depois que a API estiver Integrada.
+  mais de um repo, diga que o front só começa depois que a API estiver em Integrated.
 
 ## 5. Horas do PO
 

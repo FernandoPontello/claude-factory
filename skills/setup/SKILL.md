@@ -92,8 +92,10 @@ Mostre o resultado. Fora o caso do passo 3, não commite nada.
 
 - **Estados que faltam:** `ado setup apply --only states`. Exige admin da organização.
   - `states.process.sharedWith` lista os outros projetos que usam o mesmo processo. Com algum
-    ali, o script se recusa a mexer no processo, porque os estados apareceriam neles também: o
-    caminho é um processo próprio para o projeto (`docs/ADMIN.md`, seção 1.1).
+    ali, o script se recusa, porque os estados apareceriam neles também. Quem decide é o admin da
+    organização: estados para todos os projetos do processo (`ado setup apply --only states
+    --shared`, só com o OK explícito dele) ou um processo próprio para o projeto
+    (`docs/ADMIN.md`, seção 1).
   - Se falhar por permissão, processo de sistema ou processo compartilhado, mostre o passo a passo
     de `${CLAUDE_PLUGIN_ROOT}/docs/ADMIN.md` e siga com o resto.
 - **Time:** `team.ok: false` quer dizer que os bugs não aparecem no board junto com as histórias.
