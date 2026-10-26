@@ -6,7 +6,7 @@
 // Uso: node ado.mjs <grupo> <comando> [--opções]
 //   doctor [--for prd|deliver|release|setup]
 //   whoami
-//   repos [--fetch]                        repos do projeto, quais têm a factory, onde está o clone
+//   repos [--fetch [--update]]             repos do projeto, quais têm a factory, onde está o clone
 //   sprint current
 //   wi show|create|update|search|link|deps|claim|release|state|comment|attach|sprint|task
 //   pr create|status|threads|reply
@@ -512,7 +512,7 @@ async function wiAttach(cfg, args) {
  * O clone local frente à develop do origin: dá para ler direto (Read/Grep) ou só pelo git? E a
  * memória do sistema: até onde `docs/system/product.md` foi revisado e o que entrou depois.
  */
-function localGitInfo(dir, develop) {
+function localGitInfo(dir, develop, update = false) {
   let fetched = true;
   try {
     execFileSync('git', ['fetch', 'origin', '--quiet'], {
@@ -533,15 +533,23 @@ function localGitInfo(dir, develop) {
     }
   };
   const developSha = tryGit(['rev-parse', `origin/${develop}`]);
-  const head = tryGit(['rev-parse', 'HEAD']);
+  const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD']);
   const clean = tryGit(['status', '--porcelain']) === '';
+  let head = tryGit(['rev-parse', 'HEAD']);
+  // Clone limpo na develop e só atrás do origin: avançar é o mesmo que um pull, sem risco.
+  let updated = false;
+  if (update && developSha && head !== developSha && branch === develop && clean && tryGit(['merge-base', '--is-ancestor', 'HEAD', `origin/${develop}`]) !== null) {
+    updated = tryGit(['merge', '--ff-only', '--quiet', `origin/${develop}`]) !== null;
+    head = tryGit(['rev-parse', 'HEAD']);
+  }
   const product = developSha ? tryGit(['show', `origin/${develop}:docs/system/product.md`]) : null;
   const reviewed = product?.match(/revisado-até:\s*([0-9a-f]{7,40})/i)?.[1] ?? null;
   const log = reviewed ? tryGit(['log', '--oneline', `${reviewed}..origin/${develop}`]) : null;
   const since = log === null ? null : log ? log.split('\n') : [];
   return {
     fetched,
-    branch: tryGit(['rev-parse', '--abbrev-ref', 'HEAD']),
+    branch,
+    updated,
     readDirect: Boolean(head && developSha && head === developSha && clean),
     docs: product !== null,
     reviewedUntil: reviewed,
@@ -552,7 +560,8 @@ function localGitInfo(dir, develop) {
 
 /**
  * Os repos do projeto, quais já têm a factory (project.json na develop) e onde está o clone local.
- * `--fetch` também atualiza cada clone e diz como lê-lo (veja localGitInfo).
+ * `--fetch` busca o origin de cada clone e diz como lê-lo; `--update` também avança (fast-forward)
+ * o clone que está limpo na develop e só atrás do origin.
  */
 async function reposList(cfg, args = {}) {
   const repos = await api.listRepos(cfg);
@@ -568,7 +577,7 @@ async function reposList(cfg, args = {}) {
       defaultBranch: String(r.defaultBranch ?? '').replace('refs/heads/', '') || null,
       local: local?.path ?? null,
       remoteUrl: r.remoteUrl,
-      ...(args.fetch && local ? { git: localGitInfo(local.path, cfg.branches.develop) } : {}),
+      ...(args.fetch && local ? { git: localGitInfo(local.path, cfg.branches.develop, Boolean(args.update)) } : {}),
     });
   }
   return { workspace: cfg.workspace.root, repos: out.sort((a, b) => a.name.localeCompare(b.name)) };

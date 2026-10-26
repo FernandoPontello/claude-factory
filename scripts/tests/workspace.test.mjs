@@ -123,7 +123,7 @@ test('repos mostra quais repos do projeto têm a factory e onde está o clone', 
   assert.equal(result.repos.find((r) => r.name === 'loja-db').defaultBranch, 'master');
 });
 
-test('repos --fetch diz se o clone lê direto e o que entrou na develop depois dos docs', async () => {
+test('repos --fetch diz se o clone lê direto, --update avança o clone parado, e o que entrou depois dos docs', async () => {
   const proj = makeWorkspace([{ name: 'loja-api' }]);
   const api = proj.paths['loja-api'];
   const origin = bareOrigin(api);
@@ -146,8 +146,13 @@ test('repos --fetch diz se o clone lê direto e o que entrou na develop depois d
       ['GET', /\/Loja\/_apis\/git\/repositories$/, () => ({ body: { value: [{ id: 'r1', name: 'loja-api', defaultBranch: 'refs/heads/main' }] } })],
       ['GET', /\/items$/, () => ({ body: { path: '/.factory/project.json' } })],
     ]);
+    // O clone do PO está na develop, mas parado no primeiro commit.
+    g('switch', '-q', '-c', 'develop', reviewed);
     let [repo] = (await dispatch(['repos', '--fetch'])).repos;
     assert.equal(repo.git.fetched, true);
+    assert.equal(repo.git.readDirect, false, 'atrás do origin: ler pelo git');
+    [repo] = (await dispatch(['repos', '--fetch', '--update'])).repos;
+    assert.equal(repo.git.updated, true);
     assert.equal(repo.git.readDirect, true);
     assert.equal(repo.git.reviewedUntil, reviewed);
     assert.equal(repo.git.commitsSinceDocsTotal, 2);
