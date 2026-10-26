@@ -56,6 +56,20 @@ export function makeWorkspace(repos) {
 }
 
 /**
+ * Dá ao clone um origin de verdade sem rede: um repo bare local, que o `insteadOf` põe no lugar da
+ * URL do Azure DevOps (a URL configurada continua a mesma, então org/projeto/repo não mudam).
+ */
+export function bareOrigin(dir) {
+  const remotes = mkdtempSync(join(tmpdir(), 'factory-remotes-'));
+  const bare = join(remotes, 'origin.git');
+  mkdirSync(bare);
+  execFileSync('git', ['init', '-q', '--bare'], { cwd: bare, stdio: 'ignore' });
+  const url = execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: dir, encoding: 'utf8' }).trim();
+  execFileSync('git', ['config', `url.file:///${bare.replace(/\\/g, '/')}.insteadOf`, url], { cwd: dir, stdio: 'ignore' });
+  return { bare, cleanup: () => rmSync(remotes, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }) };
+}
+
+/**
  * fetch simulado. `routes` é uma lista de [método, regex do caminho, handler(req) -> {status, body}].
  * Cada chamada fica registrada em `calls` para as asserções.
  */

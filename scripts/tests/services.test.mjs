@@ -3,17 +3,15 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeWorkspace } from './helpers.mjs';
+import { bareOrigin, makeWorkspace } from './helpers.mjs';
 import { dispatch } from '../run.mjs';
 
 const node = JSON.stringify(process.execPath);
-const API_URL = 'https://dev.azure.com/contoso/Loja/_git/loja-api';
 
 let ws;
-let remotes;
+let origin;
 let cwd;
 
 function g(dir, ...args) {
@@ -39,13 +37,9 @@ before(() => {
     { name: 'loja-api' },
   ]);
 
-  // O "origin" da API é um repo bare local: o insteadOf troca a URL do Azure DevOps por ele.
-  remotes = mkdtempSync(join(tmpdir(), 'factory-remotes-'));
-  const bare = join(remotes, 'loja-api.git');
-  mkdirSync(bare);
-  g(bare, 'init', '-q', '--bare');
+  // O "origin" da API é um repo bare local no lugar do Azure DevOps.
   const api = ws.paths['loja-api'];
-  g(api, 'config', `url.file:///${bare.replace(/\\/g, '/')}.insteadOf`, API_URL);
+  origin = bareOrigin(api);
   mkdirSync(join(api, '.factory'));
   writeFileSync(join(api, '.factory', 'project.json'), JSON.stringify({
     run: {
@@ -84,7 +78,7 @@ after(async () => {
   }
   process.chdir(cwd);
   ws.cleanup();
-  rmSync(remotes, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  origin.cleanup();
 });
 
 test('app-start sobe a API da develop numa cópia limpa e o front recebe a URL dela', async () => {

@@ -6,7 +6,7 @@
 // Uso: node ado.mjs <grupo> <comando> [--opções]
 //   doctor [--for prd|deliver|release|setup]
 //   whoami
-//   repos                                  repos do projeto, quais têm a factory, onde está o clone
+//   repos [--fetch]                        repos do projeto, quais têm a factory, onde está o clone
 //   sprint current
 //   wi show|create|update|search|link|deps|claim|release|state|comment|attach|sprint|task
 //   pr create|status|threads|reply
@@ -14,10 +14,11 @@
 //   setup check|apply
 // Na pasta de trabalho (fora de um clone), comandos de um repo só pedem --repo <nome>.
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { FactoryError, isEntryPoint, parseArgs, required, run, toId } from './lib/cli.mjs';
-import { resolveConfig } from './lib/config.mjs';
+import { git, resolveConfig } from './lib/config.mjs';
 import { clockSkewSeconds } from './lib/http.mjs';
 import * as api from './lib/ado-api.mjs';
 import { appendMark } from './lib/runs.mjs';
@@ -507,8 +508,53 @@ async function wiAttach(cfg, args) {
 
 // ---------- repos da pasta de trabalho ----------
 
-/** Os repos do projeto, quais já têm a factory (project.json na develop) e onde está o clone local. */
-async function reposList(cfg) {
+/**
+ * O clone local frente à develop do origin: dá para ler direto (Read/Grep) ou só pelo git? E a
+ * memória do sistema: até onde `docs/system/product.md` foi revisado e o que entrou depois.
+ */
+function localGitInfo(dir, develop) {
+  let fetched = true;
+  try {
+    execFileSync('git', ['fetch', 'origin', '--quiet'], {
+      cwd: dir,
+      stdio: 'ignore',
+      timeout: 120000,
+      windowsHide: true,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+  } catch {
+    fetched = false;
+  }
+  const tryGit = (args) => {
+    try {
+      return git(args, dir);
+    } catch {
+      return null;
+    }
+  };
+  const developSha = tryGit(['rev-parse', `origin/${develop}`]);
+  const head = tryGit(['rev-parse', 'HEAD']);
+  const clean = tryGit(['status', '--porcelain']) === '';
+  const product = developSha ? tryGit(['show', `origin/${develop}:docs/system/product.md`]) : null;
+  const reviewed = product?.match(/revisado-até:\s*([0-9a-f]{7,40})/i)?.[1] ?? null;
+  const log = reviewed ? tryGit(['log', '--oneline', `${reviewed}..origin/${develop}`]) : null;
+  const since = log === null ? null : log ? log.split('\n') : [];
+  return {
+    fetched,
+    branch: tryGit(['rev-parse', '--abbrev-ref', 'HEAD']),
+    readDirect: Boolean(head && developSha && head === developSha && clean),
+    docs: product !== null,
+    reviewedUntil: reviewed,
+    commitsSinceDocs: since?.slice(0, 30) ?? null,
+    commitsSinceDocsTotal: since?.length ?? null,
+  };
+}
+
+/**
+ * Os repos do projeto, quais já têm a factory (project.json na develop) e onde está o clone local.
+ * `--fetch` também atualiza cada clone e diz como lê-lo (veja localGitInfo).
+ */
+async function reposList(cfg, args = {}) {
   const repos = await api.listRepos(cfg);
   const members = cfg.workspace.members;
   const out = [];
@@ -522,6 +568,7 @@ async function reposList(cfg) {
       defaultBranch: String(r.defaultBranch ?? '').replace('refs/heads/', '') || null,
       local: local?.path ?? null,
       remoteUrl: r.remoteUrl,
+      ...(args.fetch && local ? { git: localGitInfo(local.path, cfg.branches.develop) } : {}),
     });
   }
   return { workspace: cfg.workspace.root, repos: out.sort((a, b) => a.name.localeCompare(b.name)) };
@@ -919,7 +966,7 @@ async function setupApply(cfg, args) {
 const COMMANDS = {
   doctor: { _: (_cfg, args) => doctor(args), noConfig: true },
   whoami: { _: async (cfg) => ({ user: await api.me(cfg) }) },
-  repos: { _: (cfg) => reposList(cfg) },
+  repos: { _: (cfg, args) => reposList(cfg, args) },
   sprint: { current: sprintCurrent },
   wi: {
     sprint: wiSprint,

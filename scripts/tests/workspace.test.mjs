@@ -2,9 +2,10 @@
 
 import { test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeWorkspace, mockFetch, ME, workItem } from './helpers.mjs';
+import { bareOrigin, makeWorkspace, mockFetch, ME, workItem } from './helpers.mjs';
 import { findWorkspace, resolveConfig } from '../lib/config.mjs';
 import { FactoryError } from '../lib/cli.mjs';
 import { dispatch } from '../ado.mjs';
@@ -122,7 +123,47 @@ test('repos mostra quais repos do projeto têm a factory e onde está o clone', 
   assert.equal(result.repos.find((r) => r.name === 'loja-db').defaultBranch, 'master');
 });
 
-const ITERATION = /\/Loja\/Loja Team\/_apis\/work\/teamsettings\/iterations$/;
+test('repos --fetch diz se o clone lê direto e o que entrou na develop depois dos docs', async () => {
+  const proj = makeWorkspace([{ name: 'loja-api' }]);
+  const api = proj.paths['loja-api'];
+  const origin = bareOrigin(api);
+  const g = (...a) => execFileSync('git', a, { cwd: api, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try {
+    writeFileSync(join(api, 'a.txt'), '1');
+    g('add', '.');
+    g('commit', '-q', '-m', 'código');
+    const reviewed = g('rev-parse', 'HEAD');
+    mkdirSync(join(api, 'docs', 'system'), { recursive: true });
+    writeFileSync(join(api, 'docs', 'system', 'product.md'), `<!--\nrevisado-até: ${reviewed}\n-->\n# Loja\n`);
+    g('add', '.');
+    g('commit', '-q', '-m', 'docs');
+    writeFileSync(join(api, 'a.txt'), '2');
+    g('commit', '-q', '-am', 'cancelamento parcial');
+    g('push', '-q', 'origin', 'HEAD:develop');
+
+    process.chdir(api);
+    mock = mockFetch([
+      ['GET', /\/Loja\/_apis\/git\/repositories$/, () => ({ body: { value: [{ id: 'r1', name: 'loja-api', defaultBranch: 'refs/heads/main' }] } })],
+      ['GET', /\/items$/, () => ({ body: { path: '/.factory/project.json' } })],
+    ]);
+    let [repo] = (await dispatch(['repos', '--fetch'])).repos;
+    assert.equal(repo.git.fetched, true);
+    assert.equal(repo.git.readDirect, true);
+    assert.equal(repo.git.reviewedUntil, reviewed);
+    assert.equal(repo.git.commitsSinceDocsTotal, 2);
+    assert.match(repo.git.commitsSinceDocs[0], /cancelamento parcial/);
+
+    writeFileSync(join(api, 'a.txt'), 'rascunho local');
+    [repo] = (await dispatch(['repos', '--fetch'])).repos;
+    assert.equal(repo.git.readDirect, false, 'árvore suja: ler pelo git');
+  } finally {
+    process.chdir(cwd);
+    proj.cleanup();
+    origin.cleanup();
+  }
+});
+
+const ITERATION =/\/Loja\/Loja Team\/_apis\/work\/teamsettings\/iterations$/;
 const sprint28 = { value: [{ name: 'Sprint 28', path: 'Loja\\Sprint 28', attributes: { startDate: '2026-10-19', finishDate: '2026-11-06' } }] };
 
 test('sprint current e wi sprint põem o item na sprint atual uma vez só', async () => {
