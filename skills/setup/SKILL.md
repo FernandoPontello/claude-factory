@@ -3,7 +3,7 @@ name: setup
 description: Deixa a máquina e o projeto prontos para a factory, em todos os repos do projeto — confere tudo, conserta o que falta, clona os repos, cria as branches, aplica as regras de PR e prova a receita de execução. Pode rodar de novo sem risco.
 argument-hint: "(sem argumentos)"
 disable-model-invocation: true
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/ado.mjs":*) Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run.mjs":*) Bash(git status:*) Bash(git log:*) Bash(git remote:*) Bash(git fetch:*) Bash(git rev-parse:*) Bash(git ls-files:*) Bash(git add:*) Bash(git commit:*) Bash(git switch:*) Bash(git push -u origin chore/factory-setup:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/ado.mjs":*) Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/run.mjs":*) Bash(git status:*) Bash(git log:*) Bash(git remote:*) Bash(git fetch:*) Bash(git rev-parse:*) Bash(git ls-files:*) Bash(git add:*) Bash(git mv:*) Bash(git commit:*) Bash(git switch:*) Bash(git push -u origin chore/factory-setup:*)
 ---
 
 # /setup: um comando, sem modos
@@ -22,13 +22,16 @@ só faz o que falta.
 3. **Tudo o que muda num repo vai numa PR daquele repo**, `chore/factory-setup` → develop, com
    as policies já aplicadas. A única exceção é o repo novo, que ganha o commit inicial na main
    antes das regras de PR.
-4. **Nada destrutivo sem confirmação.** Remover arquivos da factory antiga, aposentar branch,
+4. **O trabalho num repo começa na branch do setup.** Antes de mexer em qualquer arquivo (e antes
+   de ler o código para a receita e os docs), crie `chore/factory-setup` a partir da
+   `origin/develop` (seção 5). Nunca trabalhe em cima da branch em que o clone estava.
+5. **Nada destrutivo sem confirmação.** Remover arquivos da factory antiga, aposentar branch,
    clonar, criar branch no servidor ou mudar a configuração do time: liste o que vai acontecer e
    espere o OK.
-5. **Rode as checagens sempre do mesmo jeito**, mesmo que pareçam já feitas: o script é rápido e
+6. **Rode as checagens sempre do mesmo jeito**, mesmo que pareçam já feitas: o script é rápido e
    não duplica nada.
-6. **Um repo de cada vez.** As seções 4 a 9 valem para cada repo que entra na factory, dentro do
-   clone dele. Comece por quem fornece (a API): a receita do front sobe a API da develop.
+7. **Um repo de cada vez**, dentro do clone dele: a seção 4 (repo novo) ou as seções 5 a 10, na
+   ordem. Comece por quem fornece (a API): a receita do front sobe a API da develop.
 
 Scripts: `ado` = `node "${CLAUDE_PLUGIN_ROOT}/scripts/ado.mjs"`,
 `run` = `node "${CLAUDE_PLUGIN_ROOT}/scripts/run.mjs"`. Modelos: `${CLAUDE_SKILL_DIR}/templates/`.
@@ -55,10 +58,10 @@ lado a lado (por exemplo `C:\Projetos\Loja\Loja-API` e `C:\Projetos\Loja\Loja-Fr
 - Anote, por repo:
   - **Repo novo:** só README, `.gitignore` ou nada.
   - **Factory antiga:** existe `.claude/kanban-config.json`, `.claude/factory-process.md` ou
-    `docs/epics/`. Até a migração (seção 8) entrar na develop, rode este comando como
+    `docs/epics/`. Até a migração (seção 6) entrar na develop, rode este comando como
     `/factory:setup`, com a sessão na pasta de trabalho: a factory antiga também tem um `/setup`,
     e os hooks dela valem em sessões abertas dentro do clone.
-  - **Repo já configurado:** existe `.factory/project.json`.
+  - **Repo já configurado:** existe `.factory/project.json` na develop.
 
 ## 2. Máquina
 
@@ -74,8 +77,10 @@ Se todos os repos que entram já estão configurados, a parte de máquina termin
 1. `npx playwright install chromium`, se algum repo tem testes de aceite com tela.
 2. `run prove --repo <repo>` em cada repo, a API antes do front: prova que a receita funciona
    nesta máquina.
-3. `run ensure-settings --repo <repo>` em cada repo. Se responder `changed: true`, o repo ainda
-   não declarava o plugin: essa mudança segue o fluxo da seção 9 (PR).
+3. Em cada repo, crie a branch do setup (seção 5, passos 1 a 3) e rode
+   `run ensure-settings --repo <repo>` nela. Com `changed: true`, o repo ainda não declarava o
+   plugin: crie o work item (seção 5, passo 4) e siga a seção 10 (PR). Sem mudança, volte para a
+   branch anotada.
 4. Com mais de um repo, `run ensure-settings` também na pasta de trabalho: é o que faz a sessão
    aberta nela ter a factory. Esse arquivo é só desta máquina; não vai para o git.
 
@@ -104,7 +109,7 @@ faltam.
   - liste quais serão criadas e espere o OK;
   - rode `ado setup apply --only branches --repo <repo>`;
   - num repo novo, isso acontece depois do commit inicial (seção 4).
-- **Policies:** só no fim (seção 9).
+- **Policies:** só no fim (seção 10).
 
 ## 4. Repo novo
 
@@ -115,11 +120,78 @@ faltam.
    - o `.claude/settings.json` com a declaração do plugin: `run ensure-settings`.
 2. Commit `chore: início do projeto` e push da `main`. Confirme antes de fazer o push.
 3. `ado setup apply --only branches --repo <repo>`.
-4. Pule para a seção 9 (policies).
+4. `ado setup apply --only policies --repo <repo>` (seção 10, passo 3).
 5. Termine dizendo: "o PO já pode rodar `/prd`; o primeiro PRD de cada repo é a fundação, e ela
    cria o esqueleto, a receita de execução e os docs do sistema".
 
-## 5. Receita de execução (repo com código)
+## 5. Branch de trabalho (repo com código)
+
+Tudo daqui até a PR acontece nesta branch, com o código da develop.
+
+1. **Árvore limpa.** `git status --porcelain` precisa sair vazio. Se não sair, mostre o que está
+   pendente e pare esse repo: são mudanças de alguém, e a factory não as leva nem as descarta.
+2. Anote a branch atual (`git rev-parse --abbrev-ref HEAD`), para dizer no fim como voltar.
+3. `git fetch origin` e, conforme o caso:
+   - primeira vez: `git switch -c chore/factory-setup origin/develop`;
+   - a branch já existe no origin (setup retomado, PR aberta): `git switch -c chore/factory-setup --track origin/chore/factory-setup`;
+   - já existe local: `git switch chore/factory-setup`.
+4. **Work item do setup**, que nasce em New para não aparecer na fila do dev. Os commits citam o
+   número dele:
+   `ado wi create --type feature --title "Factory: setup do <repo>" --state new --tags "factory-setup; repo:<repo>" --key factory-setup-<repo>-<AAAAMMDD>`.
+   Com a data na chave, um setup retomado no mesmo dia acha o mesmo item, e um setup de outro
+   dia não reaproveita um item já fechado.
+
+## 6. Migração da factory antiga (se houver)
+
+Primeiro de tudo, porque ela decide o que os passos seguintes ainda precisam fazer. Com OK
+explícito para cada bloco:
+
+1. **Tag de arquivo:** `git tag factory-v1-arquivo origin/develop`, e `git push origin factory-v1-arquivo`.
+   Tudo o que sai a seguir continua nela.
+2. **Docs:** os overviews viram a memória do sistema.
+   - crie a pasta `docs/system/` (o `git mv` não cria a pasta de destino);
+   - `git mv docs/overviews/product-overview.md docs/system/product.md`;
+   - `git mv docs/overviews/architecture-overview.md docs/system/architecture.md`;
+   - troque o cabeçalho pelo dos modelos e confira os commits desde a última atualização deles.
+     O `revisado-até` é `git rev-parse origin/develop`, nunca um commit desta branch: a PR entra
+     por squash, e os commits dela não chegam à develop.
+3. **Remova:**
+   - `docs/epics/`, `docs/proposals/` e `docs/wiki/`;
+   - `.claude/hooks/`, `.claude/adapters/`, `.claude/rules/factory/` e `.claude/workflows/`;
+   - as skills que a factory antiga instalou em `.claude/skills/` (`blueprint`, `bug`, `close`,
+     `code`, `design`, `ground`, `promote`, `propose`, `setup`, `sync`, `tasks`, `vision`).
+     Enquanto elas existem, o `/setup` antigo concorre com este;
+   - os agentes que a factory antiga instalou em `.claude/agents/` e a memória deles em
+     `.claude/agent-memory/`;
+   - `.claude/README.md`, `.claude/factory-process.md`, `.claude/kanban-config.json` e
+     `.claude/build-run.md`;
+   - em `.claude/settings.json`, só a chave `hooks`.
+
+   Fica o que não é da factory: skills e agentes do próprio time, `.claude/launch.json` e
+   `.claude/settings.local.json`. Pastas que não vão para o git (`.claude/worktrees/`,
+   `.claude/.factory/`) cada pessoa apaga na própria máquina; diga isso ao time.
+4. **`CLAUDE.md`:** troque o bloco da factory antiga pelo de `templates/claude-block.md`. Se o
+   arquivo inteiro é da factory antiga, sem nada do projeto, ele vira só o bloco novo.
+5. Commit `chore(factory): remove a factory antiga #<id>`, com `git add` de cada caminho.
+6. **Board:** diga ao PO para rodar `/prd migrar` (uma vez, na pasta de trabalho), depois que esta
+   PR entrar. As Features antigas viram a ideia, com um PRD por repo debaixo de cada uma.
+7. **Branch QA que já existe:** continua sendo usada.
+
+## 7. Docs do sistema (só se `docs/system/` ainda faltar)
+
+Repo que veio da factory antiga já ganhou os docs na seção 6. Para os outros:
+
+1. Divida o código em áreas (módulos, serviços, telas).
+2. Lance em paralelo um agente `scanner` da factory por área. Cada um devolve capacidades e
+   regras de arquitetura, com evidência.
+3. Escreva `docs/system/product.md` e `docs/system/architecture.md` a partir dos modelos em
+   `${CLAUDE_SKILL_DIR}/templates/`. O `revisado-até` é `git rev-parse origin/develop`. Com mais
+   de um repo, cada um descreve a sua parte e diz com quem conversa (o front cita as rotas da API
+   que usa; a API cita quem a consome).
+4. Commit `docs(factory): memória do sistema #<id>`. Diga ao dev que a revisão desses docs
+   acontece na PR do setup.
+
+## 8. Receita de execução
 
 Sem `run` em `.factory/project.json`:
 
@@ -183,8 +255,9 @@ Sem `run` em `.factory/project.json`:
    - Falhou no passo `services` porque a receita do vizinho ainda não está na develop dele: siga;
      o front prova os testes de aceite depois que a PR do setup da API entrar.
    - Não conseguiu em 3 tentativas: mostre o erro e peça ajuda à pessoa.
+9. Commit `chore(factory): receita de execução #<id>`.
 
-## 6. Playwright (repo com tela)
+## 9. Playwright (repo com tela)
 
 Se não houver Playwright:
 
@@ -193,53 +266,12 @@ Se não houver Playwright:
 2. Copie o `playwright.config.ts` e o `smoke.spec.ts` de `${CLAUDE_SKILL_DIR}/templates/`.
 3. Ajuste a receita: `e2e`, `e2eReport`.
 4. Rode `npx playwright install chromium` e `run prove`.
+5. Commit `test(factory): testes de aceite com Playwright #<id>`.
 
 Repo sem tela (API, job): os testes de aceite usam o framework de testes do repo, e `e2e` pode
 ficar de fora da receita.
 
-## 7. Docs do sistema (repo com código, sem `docs/system/`)
-
-1. Divida o código em áreas (módulos, serviços, telas).
-2. Lance em paralelo um agente `scanner` da factory por área. Cada um devolve capacidades e
-   regras de arquitetura, com evidência.
-3. Escreva `docs/system/product.md` e `docs/system/architecture.md` a partir dos modelos em
-   `${CLAUDE_SKILL_DIR}/templates/`. Preencha o `revisado-até` com `git rev-parse HEAD`. Com
-   mais de um repo, cada um descreve a sua parte e diz com quem conversa (o front cita as rotas
-   da API que usa; a API cita quem a consome).
-4. Diga ao dev que a revisão desses docs acontece na PR do setup.
-
-## 8. Migração da factory antiga
-
-Com OK explícito para cada bloco:
-
-1. **Tag de arquivo:** `git tag factory-v1-arquivo` no commit atual, e `git push origin factory-v1-arquivo`.
-2. **Docs:**
-   - `git mv docs/overviews/product-overview.md docs/system/product.md`;
-   - `git mv docs/overviews/architecture-overview.md docs/system/architecture.md`;
-   - troque o cabeçalho pelo dos modelos e confira os commits desde a última atualização deles
-     antes de definir o `revisado-até`.
-3. **Remova:**
-   - `docs/epics/`, `docs/proposals/` e `docs/wiki/`;
-   - `.claude/hooks/`, `.claude/adapters/`, `.claude/rules/factory/` e `.claude/workflows/`;
-   - as skills que a factory antiga instalou em `.claude/skills/` (`blueprint`, `bug`, `close`,
-     `code`, `design`, `ground`, `promote`, `propose`, `setup`, `sync`, `tasks`, `vision`).
-     Enquanto elas existem, o `/setup` antigo concorre com este;
-   - os agentes que a factory antiga instalou em `.claude/agents/` e a memória deles em
-     `.claude/agent-memory/`;
-   - `.claude/README.md`, `.claude/factory-process.md`, `.claude/kanban-config.json` e
-     `.claude/build-run.md`;
-   - em `.claude/settings.json`, só a chave `hooks`.
-
-   Fica o que não é da factory: skills e agentes do próprio time, `.claude/launch.json` e
-   `.claude/settings.local.json`. Pastas que não vão para o git (`.claude/worktrees/`,
-   `.claude/.factory/`) cada pessoa apaga na própria máquina; diga isso ao time.
-4. **`CLAUDE.md`:** troque o bloco da factory antiga pelo de `templates/claude-block.md`. Se o
-   arquivo inteiro é da factory antiga, sem nada do projeto, ele vira só o bloco novo.
-5. **Board:** diga ao PO para rodar `/prd migrar` (uma vez, na pasta de trabalho). As Features
-   antigas viram a ideia, com um PRD por repo debaixo de cada uma.
-6. **Branch QA que já existe:** continua sendo usada.
-
-## 9. Fechamento (em cada repo)
+## 10. Fechamento (em cada repo)
 
 1. **Arquivos da factory no repo**, se faltarem:
    - o bloco no `CLAUDE.md` e no `.gitignore`, pelos modelos;
@@ -249,17 +281,19 @@ Com OK explícito para cada bloco:
        antiga.
      - Com isso, quem abrir o repo e confiar na pasta recebe a factory sem digitar comando.
        Diga isso ao time.
-2. **Policies antes da PR:** `ado setup apply --only policies --repo <repo>`. Assim a PR do setup
+2. Commit `chore(factory): arquivos da factory #<id>`, com `git add` de cada caminho.
+3. **Policies antes da PR:** `ado setup apply --only policies --repo <repo>`. Assim a PR do setup
    também precisa de aprovação humana, como qualquer outra. Exige Project Administrator; se
    falhar por permissão, diga quem precisa rodar e siga.
-3. **Se algo mudou no repo:**
-   - crie o work item do setup, que nasce em New para não aparecer na fila do dev:
-     `ado wi create --type feature --title "Factory: setup do <repo>" --state new --tags "factory-setup; repo:<repo>" --key factory-setup-<repo>-<AAAAMMDD-HHMM>`;
-   - `git fetch origin` e `git switch -c chore/factory-setup origin/develop`;
-   - `git add` de cada arquivo por caminho;
-   - commit `chore(factory): setup do projeto #<id>`, depois `git push -u origin chore/factory-setup`;
+4. **PR**, se a branch tem algum commit em relação à `origin/develop`
+   (`git log --oneline origin/develop..HEAD`):
+   - `git push -u origin chore/factory-setup`;
    - `ado pr create --source chore/factory-setup --target develop --title "Factory: setup do <repo>" --description-file <resumo> --wi <id> --on-merge integrated --merge squash --delete-source`.
-4. `ado doctor --for deliver` no repo e mostre a lista final.
+   - Sem nenhum commit, não há PR: mova o work item do setup para Removed
+     (`ado wi state --id <id> --to removed`).
+5. `ado doctor --for deliver --repo <repo>` e mostre a lista final.
+6. Diga como voltar à branch de antes (`git switch <branch anotada na seção 5>`), e que o clone
+   fica na `chore/factory-setup` até lá.
 
 Depois do último repo, diga o que ficou para outra pessoa (estados, time, itens manuais) e o que
 vem agora: o PO roda `/prd` na pasta de trabalho, o dev roda `/deliver`.
