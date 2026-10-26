@@ -93,6 +93,13 @@ test('app-start sobe a API da develop numa cópia limpa e o front recebe a URL d
 
   const e2e = await dispatch(['check', '--id', '90', '--gate', 'e2e']);
   assert.equal(e2e.check.ok, true, e2e.tail);
+  assert.deepEqual(e2e.check.services.map((s) => [s.repo, s.ref]), [['loja-api', 'develop']]);
+
+  // O relatório diz contra qual versão da API o aceite rodou.
+  writeFileSync(join(ws.paths['loja-front'], '.factory', 'runs', '90', 'report.json'), JSON.stringify({ workItem: { id: 90, title: 'Tela de pedidos' }, partA: { acs: [] }, partB: {} }));
+  const report = await dispatch(['report', '--id', '90']);
+  assert.match(readFileSync(report.html, 'utf8'), new RegExp(`contra loja-api \\(develop @ ${svc.sha.slice(0, 7)}\\)`));
+  assert.match(readFileSync(report.prSummary, 'utf8'), /contra loja-api \(develop @/);
 
   // Subir de novo com o mesmo código não instala de novo.
   await dispatch(['app-start', '--id', '90']);

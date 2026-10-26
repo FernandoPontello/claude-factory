@@ -271,6 +271,8 @@ async function cmdCheck(cfg, args) {
     sha: head.sha,
     dirty: head.dirty,
     acResults: gate === 'e2e' ? readAcResults(cfg, Date.parse(result.startedAt)) : undefined,
+    // Contra qual versão de cada repo vizinho o aceite rodou: vai para o relatório.
+    services: gate === 'e2e' ? liveServices(state).map(({ repo, ref, sha }) => ({ repo, ref, sha })) : undefined,
     gate,
     cycle: state.cycle,
     attempt,
@@ -403,6 +405,8 @@ function serviceSpecs(cfg) {
     return { repo: String(svc.repo), env: String(svc.env), ref: svc.ref ? String(svc.ref) : null };
   });
 }
+
+const liveServices = (state) => (state.services ?? []).filter((svc) => svc.pid && svc.baseUrl);
 
 function serviceEnv(services) {
   return Object.fromEntries((services ?? []).filter((svc) => svc.pid && svc.baseUrl).map((svc) => [svc.env, svc.baseUrl]));

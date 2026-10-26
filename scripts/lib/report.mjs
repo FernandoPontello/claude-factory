@@ -59,6 +59,7 @@ export function gateStatus(checks, cycle, gates) {
       sha: last?.sha ?? null,
       dirty: last?.dirty ?? null,
       acResults: last?.acResults ?? null,
+      services: last?.services ?? null,
     };
   });
 }
@@ -216,6 +217,10 @@ export function buildReport({ state, content, checks, marks, commits, diffstat, 
     })
     .join('');
 
+  const e2eServices = gates.find((g) => g.gate === 'e2e')?.services ?? [];
+  const againstText = e2eServices.map((svc) => `${svc.repo} (${svc.ref} @ ${String(svc.sha ?? '').slice(0, 7)})`).join(', ');
+  const against = againstText ? `<p class="sub">Testes de aceite rodados contra ${esc(againstText)}.</p>` : '';
+
   const durations = phaseDurations(marks);
   const gateRows = gates.filter((g) => g.recorded).map((g) => [esc(GATE_LABEL[g.gate] ?? g.gate), esc(formatDuration(g.totalMs)), esc(String(g.attempts))]);
 
@@ -235,7 +240,7 @@ ${section('A5', 'Limitações e fora do escopo', bullets(a.limitations, 'Nenhuma
 <div class="part part-b"><div class="band"><span class="eyebrow">Parte B</span><h2>Para o dev</h2><p class="sub">O que foi construído, por que, e onde olhar com mais atenção.</p></div>
 ${section('B1', 'Abordagem e porquês', `<div class="cols"><div class="stack"><div class="eyebrow">Decididas no kickoff</div>${list(b.kickoffDecisions).map((d) => decisionCard(d, false)).join('') || '<p class="sub">Nenhuma pergunta no kickoff.</p>'}</div><div class="stack"><div class="eyebrow">Tomadas sozinho — revisar</div>${list(b.autonomousDecisions).map((d) => decisionCard(d, true)).join('') || '<p class="sub">Nenhuma.</p>'}</div></div>`)}
 ${section('B2', 'Mudanças', `${table(['Área', 'O que mudou'], list(b.changes).map((c) => [esc(c.area), esc(c.what)]))}${commits.length ? `<div class="tbl"><table><thead><tr><th>Commit</th><th>Mensagem</th></tr></thead><tbody>${commits.map((c) => `<tr><td class="mono">${esc(c.hash)}</td><td>${esc(c.subject)}</td></tr>`).join('')}</tbody></table></div>` : ''}`)}
-${section('B3', 'Qualidade', `<div class="tiles">${tiles}</div>${list(b.testsChanged).length ? `<div class="callout"><b>Testes existentes alterados ou removidos</b>${bullets(list(b.testsChanged).map((t) => `${t.test}: ${t.why}`))}</div>` : '<p class="sub">Nenhum teste existente foi removido, pulado ou enfraquecido.</p>'}${table(['Lente', 'Achado', 'Severidade', 'Destino'], list(b.findings).map((f) => [esc(f.lens), esc(f.finding), `<span class="pill ${SEVERITY_CLASS[f.severity] ?? 'neutral'}">${esc(f.severity)}</span>`, esc(f.destination)]))}`, 'Números lidos do log do executor das verificações.')}
+${section('B3', 'Qualidade', `<div class="tiles">${tiles}</div>${against}${list(b.testsChanged).length ? `<div class="callout"><b>Testes existentes alterados ou removidos</b>${bullets(list(b.testsChanged).map((t) => `${t.test}: ${t.why}`))}</div>` : '<p class="sub">Nenhum teste existente foi removido, pulado ou enfraquecido.</p>'}${table(['Lente', 'Achado', 'Severidade', 'Destino'], list(b.findings).map((f) => [esc(f.lens), esc(f.finding), `<span class="pill ${SEVERITY_CLASS[f.severity] ?? 'neutral'}">${esc(f.severity)}</span>`, esc(f.destination)]))}`, 'Números lidos do log do executor das verificações.')}
 ${section('B4', 'Riscos e pendências sugeridas', `${bullets(b.risks, 'Nenhum risco novo.')}${list(b.pendencies).length ? table(['Tipo', 'Pendência', 'Vira'], list(b.pendencies).map((p) => [esc(p.kind), esc(p.title), esc(p.target)])) : ''}`)}
 ${section('B5', 'Docs vivos', `${table(['Arquivo', 'Situação'], list(b.docs).map((d) => [`<code>${esc(d.file)}</code>`, esc(d.what)]))}${b.markerTo ? `<p class="sub">Marcador <code>revisado-até</code>: ${esc(b.markerFrom ?? '—')} → ${esc(b.markerTo)}</p>` : ''}`)}
 ${section('B6', 'Métricas do run', `${table(['Fase', 'Duração'], durations.map((d) => [esc(d.phase), esc(formatDuration(d.ms))]))}${table(['Verificação', 'Tempo total', 'Execuções'], gateRows)}`, 'Durações calculadas a partir dos carimbos dos comandos, nunca estimadas.')}
@@ -243,15 +248,16 @@ ${section('B6', 'Métricas do run', `${table(['Fase', 'Duração'], durations.ma
 <footer>Gerado por <code>run.mjs report</code> a partir de <code>.factory/runs/${esc(state.id)}</code>.</footer>
 </div></body></html>`;
 
-  const prSummary = buildPrSummary({ wi, version, verdict, acs, b });
+  const prSummary = buildPrSummary({ wi, version, verdict, acs, b, services: againstText });
   return { html, prSummary, verdict, warnings: [...verdict.warnings, ...warnings] };
 }
 
-export function buildPrSummary({ wi, version, verdict, acs, b }) {
+export function buildPrSummary({ wi, version, verdict, acs, b, services = '' }) {
   const lines = [];
   // Sem "#id" solto: na descrição da PR o Azure DevOps lê "<Estado> #id" como transição.
   lines.push(`**Relatório de entrega v${version}: ${verdict.ok ? '✅ pronto' : '⚠️ com ressalvas'}.** O relatório completo está anexado ao work item ${wi.id}.`);
   if (verdict.warnings.length) lines.push('', `Ressalvas: ${verdict.warnings.join('; ')}.`);
+  if (services) lines.push('', `Testes de aceite rodados contra ${services}.`);
   lines.push('', '| AC | Status | Teste |', '| --- | --- | --- |');
   for (const ac of acs.slice(0, 15)) lines.push(`| ${ac.id} ${ac.name ?? ''} | ${STATUS_LABEL[ac.status] ?? ac.status} | ${ac.test ?? '—'} |`);
   if (acs.length > 15) lines.push(`| … | mais ${acs.length - 15} | |`);
