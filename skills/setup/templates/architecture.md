@@ -15,6 +15,12 @@ regra muda. Decisão estrutural nova ganha uma ADR em docs/adr/.
 
 - **<regra>:** <o que vale>. Exemplo: `<arquivo>`.
 
+## Com quem este repo conversa (projeto com mais de um repo)
+
+| Repo | Direção | Por onde |
+| --- | --- | --- |
+| `<Loja-FrontEnd>` | consome este repo | `<rotas da API que ele usa>` |
+
 ## Onde cada coisa mora
 
 | Pasta | O que tem |

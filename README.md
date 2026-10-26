@@ -8,6 +8,9 @@ o dev aprova o relatório, a PR vai para o Azure DevOps, onde alguém do time ap
 O PO diz "subi alguns PRDs no board"; os devs respondem "está pronto na develop"; o PO puxa para
 a QA, valida e libera para produção.
 
+Serve para projetos de um repo ou de vários (uma API e um front, por exemplo): cada PRD é de um
+repo só, e uma ideia que toca vários vira uma Feature com um PRD por repo.
+
 ## Os quatro comandos
 
 | Comando | Quem roda | O que faz |
@@ -23,11 +26,11 @@ conduz a visão do produto e o primeiro PRD é a fundação.
 
 ## O roteiro
 
-1. **PO:** `/prd`. O Claude lê o código da `develop`, confronta a ideia com o que o sistema faz
-   hoje e monta o dossiê. Os critérios de aceite vêm em Dado/Quando/Então, junto com uma leitura
-   técnica preliminar. Com o OK do PO, o item vai para **Ready**.
-2. **Dev:** `/deliver`. O Claude reserva o item (**Executando**), cria a branch e faz o
-   **kickoff**: o plano e as perguntas técnicas, cada uma com uma recomendação.
+1. **PO:** `/prd`. O Claude lê o código da `develop` de cada repo, confronta a ideia com o que o
+   sistema faz hoje e monta o dossiê. Os critérios de aceite vêm em Dado/Quando/Então, junto com
+   uma leitura técnica preliminar. Com o OK do PO, o item vai para **Ready**.
+2. **Dev:** `/deliver`. O Claude reserva o item (**Executando**), põe na sprint atual, cria a
+   branch e faz o **kickoff**: o plano e as perguntas técnicas, cada uma com uma recomendação.
 3. **Execução:** o Claude trabalha sozinho, sem parar para perguntar:
    - escreve os testes de aceite primeiro;
    - implementa com um commit por task;
@@ -43,6 +46,42 @@ conduz a visão do produto e o primeiro PRD é a fundação.
    - **Closed** no merge na main.
 7. **QA e produção:** o PO roda `/release`, que promove para a QA. O PO valida e roda `/release`
    de novo para a main. Depois do merge, mais um `/release` cria a tag.
+
+## Projeto com mais de um repo
+
+A factory trabalha numa **pasta de trabalho**: uma pasta com um clone de cada repo do projeto,
+lado a lado. O PO abre o Claude nela; o dev abre na pasta ou no clone do repo do PRD.
+
+```
+C:\Projetos\Loja\           ← pasta de trabalho (não é repo)
+  Loja-API\                 ← clone, com .factory/project.json
+  Loja-FrontEnd\            ← clone, com .factory/project.json
+```
+
+- **Uma ideia, uma Feature; um repo, um PRD.** Quando a ideia mexe na API e no front, o `/prd`
+  grava a Feature (a ideia do PO) e um PRD filho para cada repo, com a tag `repo:<nome>` e a
+  seção "Contrato entre repos" (o que a API oferece e o front consome).
+- **A API vem antes.** O PRD do front depende do PRD da API: o `/deliver` do front só começa
+  com a API Integrada.
+- **O front testa contra a API de verdade.** A receita do front lista a API em `services`; nos
+  testes de aceite, o `/deliver` sobe a API da develop numa cópia limpa e numa porta própria, e o
+  relatório diz contra qual commit testou.
+- **Uma versão por release.** O `/release` mostra o que sobe agrupado por Feature, avisa quando
+  uma Feature sobe pela metade e aplica a mesma tag a todos os repos que mudaram.
+
+Projeto de um repo só é o mesmo fluxo, sem Feature: cada ideia vira um PRD.
+
+## Sprints e horas
+
+As sprints do time continuam. O PRD entra na sprint atual quando o dev o reserva, e cada PRD
+ganha duas tasks de horas, também na sprint:
+
+- **Especificação (PO):** criada pelo `/prd` ao gravar;
+- **Desenvolvimento (dev):** aberta no kickoff e fechada na entrega.
+
+As horas são sempre as que a pessoa declara: o Claude pergunta ao PO no fim da conversa e ao dev
+no relatório. O tempo de máquina do run fica no relatório como métrica, nunca como hora de
+alguém.
 
 ## Branches
 
@@ -80,7 +119,8 @@ porque a descrição de cada PR traz o estado antes do ID (`Integrado #1234`).
 ## O que fica no projeto
 
 ```
-.factory/project.json   # receita de execução (install, build, test, start com $PORT, ready, e2e)
+.factory/project.json   # receita de execução (install, build, test, start com $PORT, ready, e2e,
+                        # services) e, se preciso, o tipo de task do repo (ado.taskType)
 .factory/runs/          # estado local de cada run, logs, prints e relatórios (fora do git)
 docs/system/            # o mapa do sistema: product.md e architecture.md, com o marcador revisado-até
 docs/adr/               # decisões estruturais
@@ -109,6 +149,8 @@ máquina sem chave SSH no GitHub. O `#nova-factory` fixa a branch do piloto.
   auto-update) e do plugin.
 - Quem abre o projeto no Claude Code e confia na pasta recebe a factory sozinho.
 - Em pasta não confiada, a declaração é ignorada.
+- A pasta de trabalho não é repo, então a declaração dela é só da máquina: o `/setup` grava,
+  em cada máquina, o `.claude/settings.json` da pasta de trabalho também.
 
 **Atualizações.** Durante o piloto o `plugin.json` não tem `version`, então cada commit na branch
 vira uma atualização. Com auto-update, ela chega sozinha. Para buscar na hora:

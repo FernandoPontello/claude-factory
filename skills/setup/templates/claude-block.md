@@ -8,4 +8,6 @@ mapa do sistema; a receita de execução está em `.factory/project.json`.
   recebe da QA e de `hotfix/*`. Nada entra nelas sem PR aprovada.
 - Mudou um comportamento visível ou uma regra de arquitetura, mesmo numa sessão fora da factory?
   Atualize `docs/system/` na mesma PR.
+- Projeto com mais de um repo: cada PRD é de um repo só (tag `repo:<nome>`). Mudou o que este
+  repo oferece a outro (rota, contrato)? Diga na PR e no `docs/system/` deste repo.
 <!-- factory:fim -->
