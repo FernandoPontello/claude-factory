@@ -48,9 +48,15 @@ Os dois respondem em JSON. `ok: false` traz `error` e `fix`.
 2. **Qual item.** Sem argumento: `ado wi search --state ready --top 10`, mostre a lista na ordem
    do backlog e sugira o primeiro. Com argumento, use o id.
 3. `ado wi show --id <id>`. Tipo de trilha:
-   - Bug com a tag `hotfix` → `hotfix`;
-   - Bug sem a tag → `bugfix`;
+   - Bug com a tag `hotfix` → `hotfix` (o defeito está em produção e não pode esperar);
+   - Bug com a tag `develop` → `feature` (o defeito só existe na develop, que só recebe de
+     feature);
+   - Bug sem tag → `bugfix`;
    - qualquer outro → `feature` (a tag `fundacao` marca o projeto novo; veja a seção Fundação).
+
+   Mostre a trilha no kickoff. Se o código com defeito não estiver na branch de origem da trilha
+   (confira com `git log`/`git grep` em `origin/<base>`), diga isso ao dev no kickoff, antes de
+   começar.
 4. `ado wi deps --id <id>`. Se `blocked` não estiver vazio, diga o que bloqueia e pare.
 5. `ado wi claim --id <id>`. Conflito (código 4) = outra pessoa está com o item: diga e pare.
    Item em Executando ou Revisao com você volta `resumed: true` sem escrever nada: é a retomada

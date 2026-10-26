@@ -31,7 +31,9 @@ O que este item explicitamente não cobre.
 
 ## 6. Reprodução (só bug)
 
-- **Urgência:** hotfix (corrige a partir da main) | bugfix (corrige a partir da QA)
+- **Onde aparece:** só na develop | na QA | em produção (e, se em produção, se dá para esperar o
+  próximo release)
+- **Trilha:** feature a partir da develop | bugfix a partir da QA | hotfix a partir da main
 - **Passos:** 1. … 2. … 3. …
 - **Esperado:** …
 - **Obtido:** …

@@ -64,7 +64,12 @@ em loop.
   afetado, qual o valor, como funciona hoje.
 - A cada rodada, traga o que o código mostra: "hoje o cancelamento já gera estorno parcial em
   `src/Pagamentos/...`; isso substitui ou convive?".
-- Classifique no caminho: é feature (comportamento novo) ou bug (o sistema não faz o que deveria).
+- **Classifique no caminho e diga por quê:**
+  - **bug:** o sistema não faz o que já deveria fazer. Contradiz um critério de aceite entregue,
+    o `docs/system` ou o comportamento combinado;
+  - **feature:** comportamento novo, ou mudança no que foi combinado.
+
+  Na dúvida (uma "melhoria" que parece bug), diga qual você acha e por quê, e deixe o PO decidir.
 - **Duplicatas:** `ado wi search --text "<termo>" --state new,ready,running,review,integrated,qa`.
   Se algo parecido existir, mostre e pergunte se é o mesmo assunto.
 - **Bug:**
@@ -72,8 +77,19 @@ em loop.
   - se a máquina tiver Playwright e o PO der a URL do ambiente onde viu o problema, tente
     reproduzir e guarde o print em `.factory/prd/<slug>-repro.png`;
   - leia o código e levante uma hipótese de causa, com evidência;
-  - pergunte a urgência em linguagem de produto: **"precisa ser corrigido antes do próximo
-    release?"**. Sim: é hotfix (sai da main). Não: é bugfix (sai da QA).
+  - **descubra onde o defeito já está**, porque a correção sai da branch onde o código existe.
+    Pergunte ao PO onde viu (QA ou produção) e confirme no git: o trecho com defeito está em
+    `origin/main`, `origin/QA` ou só em `origin/develop`? Use `git log` e `git grep` nas três;
+  - **escolha a trilha por esta tabela** e registre no dossiê, campo "Onde aparece":
+
+    | Onde o defeito está | Pergunta ao PO | Trilha | Tag no item |
+    | --- | --- | --- | --- |
+    | só na develop | nenhuma | feature a partir da develop | `develop` |
+    | na QA, ainda não em produção | nenhuma | bugfix a partir da QA | nenhuma |
+    | em produção | **"dá para esperar o próximo release?"** Não: | hotfix a partir da main | `hotfix` |
+    | em produção | Sim: | bugfix a partir da QA | nenhuma |
+
+    Bug visto na QA nunca é hotfix: o código ainda não está na main.
 - Ambiguidade que só o dev pode resolver vai para "Perguntas técnicas em aberto" na seção 7, não
   para o PO.
 
@@ -104,10 +120,11 @@ Com o "pode gravar" do PO:
 
 ```
 ado wi create --type <feature|bug> --title "<título>" --description-file .factory/prd/<slug>.md \
-  --state ready --key prd-<slug> [--tags hotfix] [--depends-on <ids>] [--related <id>] [--parent <épico>]
+  --state ready --key prd-<slug> [--tags hotfix|develop] [--depends-on <ids>] [--related <id>] [--parent <épico>]
 ```
 
-- `--tags hotfix` só em bug urgente. Bug sem a tag segue como bugfix.
+- A tag sai da tabela da seção 2: `hotfix` para bug urgente em produção, `develop` para bug que
+  só existe na develop. Bug sem tag segue como bugfix, a partir da QA.
 - `--key` garante que rodar de novo não duplica o item.
 - Se o PO quiser continuar depois, grave com `--state new`; `/prd <id>` retoma.
 - Para editar um item ainda em New ou Ready: `ado wi update --id <id> --description-file ...`.
