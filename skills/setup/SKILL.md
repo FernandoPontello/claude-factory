@@ -55,7 +55,9 @@ lado a lado (por exemplo `C:\Projetos\Loja\Loja-API` e `C:\Projetos\Loja\Loja-Fr
 - Anote, por repo:
   - **Repo novo:** só README, `.gitignore` ou nada.
   - **Factory antiga:** existe `.claude/kanban-config.json`, `.claude/factory-process.md` ou
-    `docs/epics/`.
+    `docs/epics/`. Até a migração (seção 8) entrar na develop, rode este comando como
+    `/factory:setup`, com a sessão na pasta de trabalho: a factory antiga também tem um `/setup`,
+    e os hooks dela valem em sessões abertas dentro do clone.
   - **Repo já configurado:** existe `.factory/project.json`.
 
 ## 2. Máquina
@@ -218,11 +220,21 @@ Com OK explícito para cada bloco:
      antes de definir o `revisado-até`.
 3. **Remova:**
    - `docs/epics/`, `docs/proposals/` e `docs/wiki/`;
-   - `.claude/hooks/`, `.claude/adapters/` e `.claude/rules/factory/`;
-   - os agentes que a factory antiga instalou em `.claude/agents/`;
-   - `.claude/factory-process.md`, `.claude/kanban-config.json` e `.claude/build-run.md`;
+   - `.claude/hooks/`, `.claude/adapters/`, `.claude/rules/factory/` e `.claude/workflows/`;
+   - as skills que a factory antiga instalou em `.claude/skills/` (`blueprint`, `bug`, `close`,
+     `code`, `design`, `ground`, `promote`, `propose`, `setup`, `sync`, `tasks`, `vision`).
+     Enquanto elas existem, o `/setup` antigo concorre com este;
+   - os agentes que a factory antiga instalou em `.claude/agents/` e a memória deles em
+     `.claude/agent-memory/`;
+   - `.claude/README.md`, `.claude/factory-process.md`, `.claude/kanban-config.json` e
+     `.claude/build-run.md`;
    - em `.claude/settings.json`, só a chave `hooks`.
-4. **`CLAUDE.md`:** troque o bloco da factory antiga pelo de `templates/claude-block.md`.
+
+   Fica o que não é da factory: skills e agentes do próprio time, `.claude/launch.json` e
+   `.claude/settings.local.json`. Pastas que não vão para o git (`.claude/worktrees/`,
+   `.claude/.factory/`) cada pessoa apaga na própria máquina; diga isso ao time.
+4. **`CLAUDE.md`:** troque o bloco da factory antiga pelo de `templates/claude-block.md`. Se o
+   arquivo inteiro é da factory antiga, sem nada do projeto, ele vira só o bloco novo.
 5. **Board:** diga ao PO para rodar `/prd migrar` (uma vez, na pasta de trabalho). As Features
    antigas viram a ideia, com um PRD por repo debaixo de cada uma.
 6. **Branch QA que já existe:** continua sendo usada.
