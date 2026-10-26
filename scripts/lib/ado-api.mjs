@@ -55,6 +55,14 @@ export async function currentIteration(cfg) {
   return data?.value?.[0] ?? null;
 }
 
+export async function teamSettings(cfg) {
+  return request(cfg, 'GET', `${proj(cfg)}/${enc(cfg.team)}/_apis/work/teamsettings`);
+}
+
+export async function updateTeamSettings(cfg, body) {
+  return request(cfg, 'PATCH', `${proj(cfg)}/${enc(cfg.team)}/_apis/work/teamsettings`, { body });
+}
+
 export async function getBranch(cfg, repoId, name) {
   const data = await request(cfg, 'GET', `${proj(cfg)}/_apis/git/repositories/${repoId}/refs`, {
     query: { filter: `heads/${name}` },

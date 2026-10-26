@@ -277,6 +277,85 @@ test('wi task usa o tipo de task do repo e recusa horas que não são número', 
   }
 });
 
+test('a task do PO usa o tipo genérico mesmo no repo com tipo próprio', async () => {
+  const front = makeWorkspace([{ name: 'loja-front', project: { ado: { taskType: 'Frontend' } } }]);
+  try {
+    process.chdir(front.paths['loja-front']);
+    mock = mockFetch([
+      ['GET', ITERATION, () => ({ body: sprint28 })],
+      ['POST', /\/_apis\/wit\/wiql$/, () => ({ body: { workItems: [] } })],
+      ['GET', /\/_apis\/wit\/workitems\/72$/, () => ({ body: workItem(72) })],
+      ['POST', /\/_apis\/wit\/workitems\/\$Task$/, () => ({ body: workItem(73, { 'System.WorkItemType': 'Task', 'System.State': 'New' }) })],
+    ]);
+    const result = await dispatch(['wi', 'task', '--id', '72', '--key', 'po-72', '--title', 'Especificação (PO)', '--role', 'po']);
+    assert.equal(result.task.type, 'Task');
+  } finally {
+    process.chdir(cwd);
+    front.cleanup();
+  }
+});
+
+const STATES_OK = ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed', 'Removed'].map((name) => ({ name })) } })];
+const TEAM = /\/Loja\/Loja Team\/_apis\/work\/teamsettings$/;
+
+test('setup na pasta de trabalho confere e aplica só o que é do projeto: estados e time', async () => {
+  const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
+  try {
+    process.chdir(only.root);
+    let bugsBehavior = 'asTasks';
+    mock = mockFetch([
+      STATES_OK,
+      ['GET', TEAM, () => ({ body: { bugsBehavior } })],
+      ['PATCH', TEAM, (req) => {
+        bugsBehavior = req.body.bugsBehavior;
+        return { body: { bugsBehavior } };
+      }],
+    ]);
+    const check = await dispatch(['setup', 'check']);
+    assert.deepEqual(check.states.missing, {});
+    assert.equal(check.team.ok, false);
+    assert.equal(check.team.bugsBehavior, 'asTasks');
+    assert.equal(check.branches, undefined, 'branches e policies são de cada repo');
+
+    const applied = await dispatch(['setup', 'apply']);
+    assert.equal(applied.team.changed, true);
+    assert.equal(bugsBehavior, 'asRequirements');
+    const again = await dispatch(['setup', 'apply']);
+    assert.equal(again.team.changed, false);
+    assert.equal(mock.calls.filter((c) => c.method === 'PATCH').length, 1);
+    await expectError(dispatch(['setup', 'apply', '--only', 'branches']), 'config', /--repo/);
+  } finally {
+    process.chdir(cwd);
+    only.cleanup();
+  }
+});
+
+test('doctor aponta tipo de task do repo que não existe no processo', async () => {
+  const front = makeWorkspace([{ name: 'loja-front', project: { ado: { taskType: 'Frontend' } } }]);
+  try {
+    process.chdir(front.root);
+    mock = mockFetch([
+      connection,
+      ['GET', /\/_apis\/git\/repositories\/loja-front$/, () => ({ body: { id: 'r2', name: 'loja-front', defaultBranch: 'refs/heads/main' } })],
+      ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
+      STATES_OK,
+      ['GET', /\/workitemtypes\/Frontend\/states$/, () => ({ status: 404, body: { message: 'tipo não existe' } })],
+      ['GET', /\/policy\/types$/, () => ({ body: { value: [] } })],
+      ['GET', /\/policy\/configurations$/, () => ({ body: { value: [] } })],
+    ]);
+    // Na pasta de trabalho não há taskType (ele é de cada repo); com --repo, há.
+    await assert.rejects(dispatch(['doctor', '--for', 'deliver', '--repo', 'loja-front']), (err) => {
+      const tasks = err.data.checks.find((c) => c.id === 'tasks');
+      assert.equal(tasks.ok, false);
+      assert.match(tasks.detail, /Frontend/);
+      return true;
+    });
+  } finally {
+    process.chdir(cwd);
+    front.cleanup();
+  }
+});
+
 test('wi link põe o PRD debaixo da Feature e não troca um pai existente', async () => {
   process.chdir(ws.paths['loja-api']);
   const parentRel = (id) => ({ rel: 'System.LinkTypes.Hierarchy-Reverse', url: `https://dev.azure.com/contoso/_apis/wit/workItems/${id}` });
@@ -291,6 +370,19 @@ test('wi link põe o PRD debaixo da Feature e não troca um pai existente', asyn
   await expectError(dispatch(['wi', 'link', '--id', '81', '--parent', '8']), 'conflict', /#9/);
   const same = await dispatch(['wi', 'link', '--id', '81', '--parent', '9']);
   assert.equal(same.changed, false);
+});
+
+test('wi show diz o repo do PRD, de quem ele depende e quem depende dele', async () => {
+  process.chdir(ws.paths['loja-api']);
+  const rel = (kind, id) => ({ rel: `System.LinkTypes.${kind}`, url: `https://dev.azure.com/contoso/_apis/wit/workItems/${id}` });
+  mock = mockFetch([
+    ['GET', /\/_apis\/wit\/workitems\/91$/, () => ({ body: workItem(91, { 'System.Tags': 'factory-key:prd-a; repo:loja-api' }, { relations: [rel('Hierarchy-Reverse', 90), rel('Dependency-Forward', 92)] }) })],
+  ]);
+  const { item } = await dispatch(['wi', 'show', '--id', '91']);
+  assert.equal(item.repo, 'loja-api');
+  assert.equal(item.parent, 90);
+  assert.deepEqual(item.dependents, [92]);
+  assert.deepEqual(item.dependsOn, []);
 });
 
 test('wi search filtra pelos filhos de uma Feature e mostra o repo de cada PRD', async () => {

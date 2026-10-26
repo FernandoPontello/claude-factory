@@ -42,7 +42,7 @@ function typeName(cfg, value) {
   if (key === 'feature' || key === 'story' || key === 'user story') return cfg.types.feature;
   if (key === 'bug' || key === 'bugfix' || key === 'hotfix') return cfg.types.bug;
   if (key === 'group') return cfg.types.group;
-  if (key === 'task') return cfg.taskType ?? cfg.types.task;
+  if (key === 'task') return cfg.types.task;
   return value;
 }
 
@@ -99,6 +99,7 @@ function sameUser(a, b) {
 const REL = {
   related: 'System.LinkTypes.Related',
   predecessor: 'System.LinkTypes.Dependency-Reverse',
+  successor: 'System.LinkTypes.Dependency-Forward',
   parent: 'System.LinkTypes.Hierarchy-Reverse',
   child: 'System.LinkTypes.Hierarchy-Forward',
 };
@@ -125,6 +126,7 @@ function summarize(cfg, item) {
     url: item._links?.html?.href ?? workItemUrl(cfg, item.id),
     related: byRel(REL.related),
     dependsOn: byRel(REL.predecessor),
+    dependents: byRel(REL.successor),
     parent: byRel(REL.parent)[0] ?? null,
     children: byRel(REL.child),
     repo: repoTag(f['System.Tags']),
@@ -152,7 +154,7 @@ function relationOp(cfg, rel, targetId) {
 
 const SCOPES = {
   prd: ['node', 'remote', 'token', 'project', 'identity', 'states'],
-  deliver: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches', 'policies', 'recipe', 'services'],
+  deliver: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches', 'policies', 'recipe', 'services', 'tasks'],
   release: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches'],
   setup: [],
 };
@@ -227,6 +229,16 @@ async function doctor(args) {
     }
   }
   add('states', missingStates.length === 0, missingStates.length ? `faltam: ${missingStates.join('; ')}` : 'todos os estados existem', 'O admin da organização roda /setup uma vez (ou segue docs/ADMIN.md).');
+
+  // A task de horas do dev nasce com o tipo do repo: tipo que não existe só falharia na entrega.
+  if (cfg.taskType) {
+    try {
+      await api.getTypeStates(cfg, cfg.taskType);
+      add('tasks', true, `tasks de horas do tipo ${cfg.taskType}`);
+    } catch (err) {
+      add('tasks', false, `o tipo de task "${cfg.taskType}" não existe no processo (${err.message})`, 'Corrija "ado.taskType" em .factory/project.json com um tipo de task que o projeto tem.');
+    }
+  }
 
   if (repo) {
     try {
@@ -650,7 +662,8 @@ async function wiTask(cfg, args) {
   }
 
   const title = required(args, 'title');
-  const type = args.type && args.type !== true ? String(args.type) : cfg.taskType ?? cfg.types.task;
+  // A task do dev usa o tipo do repo (Backend, Frontend...); a do PO, o tipo genérico.
+  const type = args.type && args.type !== true ? typeName(cfg, args.type) : args.role === 'po' ? cfg.types.task : cfg.taskType ?? cfg.types.task;
   const parent = await api.getWorkItem(cfg, parentId);
   const iteration = (await currentSprintPath(cfg)) ?? parent.fields?.['System.IterationPath'];
   const ops = [
@@ -857,24 +870,38 @@ async function inspectPolicies(cfg, repo, branches) {
   return { typeIds, missing };
 }
 
-async function setupCheck(cfg) {
-  const repo = await api.getRepo(cfg);
-  const branches = await fixedBranches(cfg, repo);
-  const missingBranches = [];
-  for (const name of Object.values(branches)) {
-    if (!(await api.getBranch(cfg, repo.id, name))) missingBranches.push(name);
+/** O time precisa ver os bugs no board junto com as histórias, com os mesmos estados. */
+async function inspectTeam(cfg) {
+  try {
+    const settings = await api.teamSettings(cfg);
+    return { name: cfg.team, bugsBehavior: settings?.bugsBehavior ?? null, ok: settings?.bugsBehavior === 'asRequirements' };
+  } catch (err) {
+    if (err instanceof FactoryError && err.code === 'not_found') {
+      return { name: cfg.team, ok: false, error: `O time "${cfg.team}" não existe no projeto.`, fix: 'Grave o nome do time em .factory/project.json, em "ado": { "team": "<nome>" }.' };
+    }
+    throw err;
   }
-  const states = await inspectStates(cfg);
-  const { missing: policies } = await inspectPolicies(cfg, repo, branches);
-  return {
-    branches: { fixed: branches, missing: missingBranches },
-    states: { missing: states },
-    policies: { missing: policies },
-    manual: [
-      'Repos > Settings: ligue "Commit mention linking" e "Commit mention work item resolution" (não há API pública estável para isso).',
-      'Boards > colunas do time: nomeie as colunas em português (Rascunho, Pronto para dev, Em execução, Em revisão, Integrado, Em homologação, Concluído).',
-    ],
-  };
+}
+
+/** Na pasta de trabalho, só o que é do projeto (estados e time); branches e policies vêm com --repo. */
+async function setupCheck(cfg) {
+  const result = { states: { missing: await inspectStates(cfg) }, team: await inspectTeam(cfg) };
+  if (cfg.repo) {
+    const repo = await api.getRepo(cfg);
+    const branches = await fixedBranches(cfg, repo);
+    const missingBranches = [];
+    for (const name of Object.values(branches)) {
+      if (!(await api.getBranch(cfg, repo.id, name))) missingBranches.push(name);
+    }
+    result.branches = { fixed: branches, missing: missingBranches };
+    result.policies = { missing: (await inspectPolicies(cfg, repo, branches)).missing };
+  }
+  result.manual = [
+    'Repos > Settings, em cada repo: ligue "Commit mention linking" e "Commit mention work item resolution" (não há API pública estável para isso).',
+    'Boards > colunas do time: cada estado da factory numa coluna, com nome em português (Rascunho, Pronto para dev, Em execução, Em revisão, Integrado, Em homologação, Concluído). Estado sem coluna some do board.',
+    'Boards > configurações do time > regras de automação: desligue as regras que mudam o estado do pai quando um filho muda (a task de horas não pode mover o PRD).',
+  ];
+  return result;
 }
 
 function policySettings(kind, repoId, refName, cfg) {
@@ -949,17 +976,27 @@ async function applyPolicies(cfg, repo, branches) {
   return { applied };
 }
 
+async function applyTeam(cfg) {
+  const team = await inspectTeam(cfg);
+  if (team.error) throw new FactoryError('config', team.error, team.fix);
+  if (team.ok) return { changed: false, bugsBehavior: team.bugsBehavior };
+  await api.updateTeamSettings(cfg, { bugsBehavior: 'asRequirements' });
+  return { changed: true, bugsBehavior: 'asRequirements', before: team.bugsBehavior };
+}
+
 async function setupApply(cfg, args) {
-  const only = args.only && args.only !== true ? String(args.only).split(',') : ['states', 'branches', 'policies'];
-  const repo = await api.getRepo(cfg);
-  const branches = await fixedBranches(cfg, repo);
+  const projectSteps = ['states', 'team'];
+  const only = args.only && args.only !== true ? String(args.only).split(',') : cfg.repo ? [...projectSteps, 'branches', 'policies'] : projectSteps;
+  const repo = only.some((step) => !projectSteps.includes(step)) ? await api.getRepo(cfg) : null;
+  const branches = repo ? await fixedBranches(cfg, repo) : null;
   const result = {};
   const failures = [];
-  // Ordem: estados, branches e, por último, policies (depois delas nada entra sem PR).
-  for (const step of ['states', 'branches', 'policies']) {
+  // Ordem: estados, time, branches e, por último, policies (depois delas nada entra sem PR).
+  for (const step of ['states', 'team', 'branches', 'policies']) {
     if (!only.includes(step)) continue;
     try {
       if (step === 'states') result.states = await applyStates(cfg);
+      if (step === 'team') result.team = await applyTeam(cfg);
       if (step === 'branches') result.branches = await applyBranches(cfg, repo, branches);
       if (step === 'policies') result.policies = await applyPolicies(cfg, repo, branches);
     } catch (err) {
