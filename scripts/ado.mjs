@@ -11,7 +11,7 @@
 //   wi show|create|update|search|link|deps|claim|release|state|comment|attach|sprint|task
 //   pr create|status|threads|reply
 //   branch ensure
-//   setup check|apply
+//   setup check | apply [--only states,team,branches,policies] [--shared]
 // Na pasta de trabalho (fora de um clone), comandos de um repo só pedem --repo <nome>.
 
 import { execFileSync } from 'node:child_process';
@@ -52,7 +52,7 @@ function stateName(cfg, value) {
 }
 
 /**
- * Os estados que o agente pode escrever. Integrado, Homologando e Closed só mudam no merge da PR
+ * Os estados que o agente pode escrever. Integrated, Validating e Closed só mudam no merge da PR
  * (pela descrição `<Estado> #id`); escrever neles à mão faria o board mentir.
  */
 function agentState(cfg, value) {
@@ -486,7 +486,7 @@ async function wiState(cfg, args) {
   const to = agentState(cfg, required(args, 'to'));
   const current = summarize(cfg, await api.getWorkItem(cfg, id));
   if (current.state === to) return { changed: false, item: current };
-  // O item nunca volta: depois do merge (Integrado, Homologando, Closed) nada o move para trás.
+  // O item nunca volta: depois do merge (Integrated, Validating, Closed) nada o move para trás.
   const merged = [cfg.states.integrated, cfg.states.qa, cfg.states.closed];
   if (merged.includes(current.state) && to !== cfg.states.removed) {
     return { changed: false, note: `O item já está em "${current.state}"; o merge passou na frente.`, item: current };
@@ -752,7 +752,7 @@ async function prCreate(cfg, args) {
       completionOptions: {
         mergeStrategy: strategy,
         deleteSourceBranch: Boolean(args['delete-source']),
-        // Só transiciona quando a descrição traz o estado (`Integrado #id`). Num back-merge,
+        // Só transiciona quando a descrição traz o estado (`Integrated #id`). Num back-merge,
         // "completar itens linkados" levaria o item a Closed antes da hora.
         transitionWorkItems: Boolean(onMerge),
         // Só a PR principal cita os itens no commit: num back-merge o #id faria o item aparecer
@@ -910,7 +910,7 @@ async function setupCheck(cfg) {
   }
   result.manual = [
     'Repos > Settings, em cada repo: ligue "Commit mention linking" e "Commit mention work item resolution" (não há API pública estável para isso).',
-    'Boards > colunas do time: cada estado da factory numa coluna, com nome em português (Rascunho, Pronto para dev, Em execução, Em revisão, Integrado, Em homologação, Concluído). Estado sem coluna some do board.',
+    'Boards > colunas do time: cada estado numa coluna (Draft, Ready for Dev, In Progress, In Review, Integrated, In QA, Done, mais uma coluna para cada estado antigo que ainda tem itens). Estado sem coluna some do board.',
     'Boards > configurações do time > regras de automação: desligue as regras que mudam o estado do pai quando um filho muda (a task de horas não pode mover o PRD).',
   ];
   return result;
@@ -947,7 +947,11 @@ async function inspectProcess(cfg) {
   return { id: processId, name: info.name, customizationType: info.customizationType, sharedWith };
 }
 
-async function applyStates(cfg) {
+/**
+ * `shared`: o admin decidiu que os estados valem para todos os projetos do processo. Sem isso, um
+ * processo compartilhado é recusado, porque os estados apareceriam nos outros projetos.
+ */
+async function applyStates(cfg, { shared = false } = {}) {
   const missing = await inspectStates(cfg);
   if (!Object.keys(missing).length) return { applied: [], skipped: 'todos os estados já existem' };
   const processInfo = await inspectProcess(cfg);
@@ -960,11 +964,11 @@ async function applyStates(cfg) {
     );
   }
   // Estado novo num processo compartilhado aparece em todos os projetos que o usam.
-  if (processInfo.sharedWith.length) {
+  if (processInfo.sharedWith.length && !shared) {
     throw new FactoryError(
       'config',
       `O processo "${processInfo.name}" também é usado por ${processInfo.sharedWith.join(', ')}; os estados da factory apareceriam lá.`,
-      'O admin cria um processo próprio para o projeto, com as mesmas customizações, e muda o projeto para ele (docs/ADMIN.md, seção 1.1). Depois, rode o /setup de novo.',
+      'Quem decide é o admin da organização: estados para todos os projetos do processo (rode de novo com --shared) ou um processo próprio para este projeto (docs/ADMIN.md, seção 1).',
       { process: processInfo },
     );
   }
@@ -1027,7 +1031,7 @@ async function setupApply(cfg, args) {
   for (const step of ['states', 'team', 'branches', 'policies']) {
     if (!only.includes(step)) continue;
     try {
-      if (step === 'states') result.states = await applyStates(cfg);
+      if (step === 'states') result.states = await applyStates(cfg, { shared: Boolean(args.shared) });
       if (step === 'team') result.team = await applyTeam(cfg);
       if (step === 'branches') result.branches = await applyBranches(cfg, repo, branches);
       if (step === 'policies') result.policies = await applyPolicies(cfg, repo, branches);

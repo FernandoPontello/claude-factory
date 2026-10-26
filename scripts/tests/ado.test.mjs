@@ -44,14 +44,14 @@ test('wi claim reserva um item Ready com controle de concorrência e grava o car
   mock = mockFetch([
     connection,
     ['GET', /\/_apis\/wit\/workitems\/12$/, () => ({ body: workItem(12, {}, { rev: 7 }) })],
-    ['PATCH', /\/_apis\/wit\/workitems\/12$/, (req) => ({ body: workItem(12, { 'System.State': 'Executando', 'System.AssignedTo': { uniqueName: 'ana@contoso.com' } }, { rev: 8 }) })],
+    ['PATCH', /\/_apis\/wit\/workitems\/12$/, (req) => ({ body: workItem(12, { 'System.State': 'Executing', 'System.AssignedTo': { uniqueName: 'ana@contoso.com' } }, { rev: 8 }) })],
   ]);
   const result = await dispatch(['wi', 'claim', '--id', '12']);
   assert.equal(result.claimed, true);
   assert.equal(result.resumed, false);
   const patch = mock.calls.find((c) => c.method === 'PATCH');
   assert.deepEqual(patch.body[0], { op: 'test', path: '/rev', value: 7 });
-  assert.equal(patch.body[1].value, 'Executando');
+  assert.equal(patch.body[1].value, 'Executing');
   assert.equal(patch.body[2].value, 'ana@contoso.com');
   const marks = readFileSync(join(repo.dir, '.factory', 'runs', '12', 'marks.jsonl'), 'utf8');
   assert.match(marks, /"event":"claimed"/);
@@ -60,7 +60,7 @@ test('wi claim reserva um item Ready com controle de concorrência e grava o car
 test('wi claim retoma o próprio item sem escrever no board', async () => {
   mock = mockFetch([
     connection,
-    ['GET', /\/_apis\/wit\/workitems\/13$/, () => ({ body: workItem(13, { 'System.State': 'Executando', 'System.AssignedTo': { uniqueName: 'ANA@contoso.com' } }) })],
+    ['GET', /\/_apis\/wit\/workitems\/13$/, () => ({ body: workItem(13, { 'System.State': 'Executing', 'System.AssignedTo': { uniqueName: 'ANA@contoso.com' } }) })],
   ]);
   const result = await dispatch(['wi', 'claim', '--id', '13']);
   assert.equal(result.resumed, true);
@@ -86,10 +86,10 @@ test('wi claim traduz a corrida perdida (412) em conflito', async () => {
   await expectError(dispatch(['wi', 'claim', '--id', '16']), 'conflict');
 });
 
-test('wi claim retoma item em Revisao do próprio dev (comentários da PR)', async () => {
+test('wi claim retoma item em Reviewing do próprio dev (comentários da PR)', async () => {
   mock = mockFetch([
     connection,
-    ['GET', /\/_apis\/wit\/workitems\/17$/, () => ({ body: workItem(17, { 'System.State': 'Revisao', 'System.AssignedTo': { uniqueName: 'ana@contoso.com' } }) })],
+    ['GET', /\/_apis\/wit\/workitems\/17$/, () => ({ body: workItem(17, { 'System.State': 'Reviewing', 'System.AssignedTo': { uniqueName: 'ana@contoso.com' } }) })],
   ]);
   const result = await dispatch(['wi', 'claim', '--id', '17']);
   assert.equal(result.resumed, true);
@@ -98,7 +98,7 @@ test('wi claim retoma item em Revisao do próprio dev (comentários da PR)', asy
 
 test('wi state não escreve estados de merge e nunca faz o item voltar', async () => {
   mock = mockFetch([
-    ['GET', /\/_apis\/wit\/workitems\/18$/, () => ({ body: workItem(18, { 'System.State': 'Integrado' }) })],
+    ['GET', /\/_apis\/wit\/workitems\/18$/, () => ({ body: workItem(18, { 'System.State': 'Integrated' }) })],
     ['GET', /\/_apis\/wit\/workitems\/19$/, () => ({ body: workItem(19, { 'System.State': 'Ready' }) })],
   ]);
   await expectError(dispatch(['wi', 'state', '--id', '18', '--to', 'integrated']), 'config');
@@ -106,7 +106,7 @@ test('wi state não escreve estados de merge e nunca faz o item voltar', async (
   const back = await dispatch(['wi', 'state', '--id', '18', '--to', 'review']);
   assert.equal(back.changed, false);
   const skip = await dispatch(['wi', 'state', '--id', '19', '--to', 'review']);
-  assert.equal(skip.changed, false, 'Revisao só vem de Executando');
+  assert.equal(skip.changed, false, 'Reviewing só vem de Executing');
   assert.equal(mock.calls.filter((c) => c.method === 'PATCH').length, 0);
 });
 
@@ -195,8 +195,8 @@ test('wi deps lista o que ainda bloqueia o início', async () => {
   mock = mockFetch([
     ['GET', /\/_apis\/wit\/workitems\/40$/, () => ({ body: workItem(40, {}, { relations: [rel(41), rel(42)] }) })],
     ['POST', /\/workitemsbatch$/, () => ({ body: { value: [
-      { id: 41, fields: { 'System.Title': 'Fundação', 'System.State': 'Integrado' } },
-      { id: 42, fields: { 'System.Title': 'Login', 'System.State': 'Executando' } },
+      { id: 41, fields: { 'System.Title': 'Fundação', 'System.State': 'Integrated' } },
+      { id: 42, fields: { 'System.Title': 'Login', 'System.State': 'Executing' } },
     ] } })],
   ]);
   const result = await dispatch(['wi', 'deps', '--id', '40']);
@@ -221,7 +221,7 @@ test('pr create da feature acrescenta o estado de merge e liga a transição', a
   const result = await dispatch(['pr', 'create', '--source', 'feature/12-x', '--target', 'develop', '--title', 'Cancelar pedido', '--description-file', file, '--wi', '12', '--on-merge', 'integrated', '--delete-source', '--run', '12']);
   assert.equal(result.created, true);
   const create = mock.calls.find((c) => c.method === 'POST' && /pullrequests$/.test(c.path));
-  assert.match(create.body.description, /Integrado #12$/);
+  assert.match(create.body.description, /Integrated #12$/);
   assert.deepEqual(create.body.workItemRefs, [{ id: '12' }]);
   const auto = mock.calls.find((c) => c.method === 'PATCH');
   assert.equal(auto.body.completionOptions.transitionWorkItems, true);
@@ -277,7 +277,7 @@ test('doctor aponta estados que faltam no processo', async () => {
     connection,
     repoRoute(),
     ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
-    ['GET', /\/workitemtypes\/User Story\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+    ['GET', /\/workitemtypes\/User Story\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executing', 'Reviewing', 'Integrated', 'Validating', 'Closed'].map((name) => ({ name })) } })],
     ['GET', /\/workitemtypes\/Bug\/states$/, () => ({ body: { value: ['New', 'Active', 'Closed'].map((name) => ({ name })) } })],
     ['GET', /\/policy\/types$/, () => ({ body: { value: [{ id: 'p1', displayName: 'Minimum number of reviewers' }] } })],
     ['GET', /\/policy\/configurations$/, () => ({ body: { value: [{ type: { id: 'p1' }, isEnabled: true }] } })],

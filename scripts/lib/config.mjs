@@ -13,10 +13,10 @@ import { FactoryError } from './cli.mjs';
 export const DEFAULT_STATES = {
   new: 'New',
   ready: 'Ready',
-  running: 'Executando',
-  review: 'Revisao',
-  integrated: 'Integrado',
-  qa: 'Homologando',
+  running: 'Executing',
+  review: 'Reviewing',
+  integrated: 'Integrated',
+  qa: 'Validating',
   closed: 'Closed',
   removed: 'Removed',
 };

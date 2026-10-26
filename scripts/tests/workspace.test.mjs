@@ -311,7 +311,7 @@ test('a task do PO usa o tipo genérico mesmo no repo com tipo próprio', async 
   }
 });
 
-const STATES_OK = ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed', 'Removed'].map((name) => ({ name })) } })];
+const STATES_OK = ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executing', 'Reviewing', 'Integrated', 'Validating', 'Closed', 'Removed'].map((name) => ({ name })) } })];
 const TEAM = /\/Loja\/Loja Team\/_apis\/work\/teamsettings$/;
 const HOURS_FIELD = { referenceName: 'Microsoft.VSTS.Scheduling.CompletedWork' };
 const FIELDS_OK = ['GET', /\/workitemtypes\/[^/]+\/fields$/, () => ({ body: { value: [HOURS_FIELD] } })];
@@ -348,7 +348,7 @@ test('setup na pasta de trabalho confere e aplica só o que é do projeto: estad
   }
 });
 
-test('setup não põe estados num processo que outros projetos usam', async () => {
+test('setup só põe estados num processo que outros projetos usam com --shared, decisão do admin', async () => {
   const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
   try {
     process.chdir(only.root);
@@ -370,14 +370,20 @@ test('setup não põe estados num processo que outros projetos usam', async () =
 
     const check = await dispatch(['setup', 'check']);
     assert.deepEqual(check.states.process.sharedWith, ['Consultoria', 'Estimador']);
-    await expectError(dispatch(['setup', 'apply', '--only', 'states']), 'config', /Estimador.*processo próprio/s);
+    await expectError(dispatch(['setup', 'apply', '--only', 'states']), 'config', /Estimador.*--shared/s);
     assert.equal(mock.calls.filter((c) => c.method === 'POST').length, 0, 'nada foi escrito no processo compartilhado');
+
+    // O admin decidiu: estados para todos os projetos do processo.
+    const sharedApplied = await dispatch(['setup', 'apply', '--only', 'states', '--shared']);
+    assert.equal(sharedApplied.states.applied.length, 10);
+    assert.ok(sharedApplied.states.applied.includes('User Story: Reviewing'));
+    mock.calls.length = 0;
 
     // Com um processo só do projeto, os estados entram.
     sharedWith = [{ name: 'Loja' }];
     const applied = await dispatch(['setup', 'apply', '--only', 'states']);
     assert.equal(applied.states.applied.length, 10);
-    assert.ok(applied.states.applied.includes('Bug: Homologando'));
+    assert.ok(applied.states.applied.includes('Bug: Validating'));
   } finally {
     process.chdir(cwd);
     only.cleanup();
@@ -449,7 +455,7 @@ test('wi search filtra pelos filhos de uma Feature e mostra o repo de cada PRD',
       return { body: { workItems: [{ id: 91 }, { id: 92 }] } };
     }],
     ['POST', /\/workitemsbatch$/, () => ({ body: { value: [
-      { id: 91, fields: { 'System.Title': 'API', 'System.State': 'Integrado', 'System.WorkItemType': 'User Story', 'System.Tags': 'repo:loja-api; factory-key:prd-a', 'System.Parent': 90 } },
+      { id: 91, fields: { 'System.Title': 'API', 'System.State': 'Integrated', 'System.WorkItemType': 'User Story', 'System.Tags': 'repo:loja-api; factory-key:prd-a', 'System.Parent': 90 } },
       { id: 92, fields: { 'System.Title': 'Tela', 'System.State': 'Ready', 'System.WorkItemType': 'User Story', 'System.Tags': 'repo:loja-front', 'System.Parent': 90 } },
     ] } })],
   ]);
@@ -465,7 +471,7 @@ test('doctor do front aponta o serviço cujo repo não está clonado ao lado', a
       connection,
       ['GET', /\/_apis\/git\/repositories\/loja-front$/, () => ({ body: { id: 'r2', name: 'loja-front', defaultBranch: 'refs/heads/main' } })],
       ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
-      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executing', 'Reviewing', 'Integrated', 'Validating', 'Closed'].map((name) => ({ name })) } })],
       FIELDS_OK,
       ['GET', /\/policy\/types$/, () => ({ body: { value: [{ id: 'p1', displayName: 'Minimum number of reviewers' }] } })],
       ['GET', /\/policy\/configurations$/, () => ({ body: { value: [{ type: { id: 'p1' }, isEnabled: true }] } })],
@@ -490,7 +496,7 @@ test('doctor na pasta de trabalho confere o projeto e deixa branches e receita p
     mock = mockFetch([
       connection,
       ['GET', /\/_apis\/projects\/Loja$/, () => ({ body: { id: 'proj-1', name: 'Loja' } })],
-      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executing', 'Reviewing', 'Integrated', 'Validating', 'Closed'].map((name) => ({ name })) } })],
       FIELDS_OK,
     ]);
     const result = await dispatch(['doctor', '--for', 'prd']);

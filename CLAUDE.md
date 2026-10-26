@@ -39,8 +39,9 @@ Para experimentar o plugin sem publicar, abra o Claude Code num projeto de teste
   `${CLAUDE_SKILL_DIR}`, sempre com o caminho entre aspas.
 - **As regras inegociáveis de cada skill ficam no topo**, porque a plataforma preserva o começo da
   skill quando a sessão compacta.
-- **Texto para pessoas em português claro e direto.** Nomes de estado do board são ASCII de uma
-  palavra (`Integrado`, `Homologando`), porque o Azure DevOps os lê na descrição da PR.
+- **Texto para pessoas em português claro e direto.** Os nomes do board são em inglês, a pedido
+  do admin da organização. Estados são ASCII de uma palavra (`Integrated`, `Validating`), porque
+  o Azure DevOps os lê na descrição da PR; colunas têm o nome que o time lê (`In QA`).
 - **Mudou o comportamento de um script:** teste em `scripts/tests/` na mesma mudança.
 
 ## Versão e canal de distribuição
