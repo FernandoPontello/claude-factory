@@ -6,15 +6,18 @@
 //   init --kind feature|bugfix|hotfix --title "..."   cria (ou retoma) o run e diz a trilha
 //   phase --to <fase>                                  registra a fase atual
 //   check --gate install|build|test|e2e|lint [--new-cycle]
-//   app-start | app-stop
+//   app-start | app-stop [--clean]                    o app (e os serviços de outros repos)
 //   report                                            gera relatorio-vN.html e pr-summary.md
 //   status                                            resumo para retomar o run
 //   prove                                             (sem --id) prova a receita para o /setup
 //   ensure-settings                                   (sem --id) declara o plugin no .claude/settings.json
+// Na pasta de trabalho (fora de um clone), --repo <nome> diz em qual repo o run acontece.
 
 import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FactoryError, isEntryPoint, parseArgs, required, run, toId } from './lib/cli.mjs';
@@ -60,6 +63,13 @@ function defaultBranch(cfg) {
     // sem rede ou sem credencial: cai no nome mais comum
   }
   return 'main';
+}
+
+/** Troca `$PORT`, `$BASE_URL` e as variáveis dos serviços pelos valores deste run. */
+function fillVars(text, vars) {
+  return Object.entries(vars)
+    .sort((a, b) => b[0].length - a[0].length)
+    .reduce((out, [name, value]) => out.split(`$${name}`).join(String(value)), String(text));
 }
 
 function headInfo(cfg) {
@@ -195,8 +205,8 @@ function readCounts(cfg, gate, sinceMs) {
 }
 
 async function appResponds(cfg, app) {
-  if (!app?.port || !cfg.run?.ready) return false;
-  const url = cfg.run.ready.replace(/\$PORT/g, String(app.port)).replace(/\$BASE_URL/g, app.baseUrl);
+  if (!app?.port || !(app.readyUrl || cfg.run?.ready)) return false;
+  const url = app.readyUrl ?? fillVars(cfg.run.ready, { PORT: app.port, BASE_URL: app.baseUrl });
   try {
     const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
     return res.status < 500;
@@ -229,6 +239,13 @@ async function cmdCheck(cfg, args) {
   if (gate === 'e2e' && !(await appResponds(cfg, state.app))) {
     throw new FactoryError('config', 'Os testes de aceite precisam do app deste run de pé, e ele não está respondendo.', 'Rode `run.mjs app-start --id <id>` antes do check de e2e.');
   }
+  if (gate === 'e2e') {
+    for (const svc of state.services ?? []) {
+      if (!(await appResponds(cfg, svc))) {
+        throw new FactoryError('config', `O serviço ${svc.repo} (origin/${svc.ref}) não está respondendo.`, 'Rode `run.mjs app-start --id <id>` de novo: ele sobe os serviços e o app.');
+      }
+    }
+  }
   const checks = readChecks(cfg, id);
   const failures = consecutiveFailures(checks, gate, state.cycle);
   if (failures >= cfg.maxAttempts) {
@@ -243,12 +260,9 @@ async function cmdCheck(cfg, args) {
   const port = state.app?.port;
   const shotsDir = join(runDir(cfg, id), 'shots');
   mkdirSync(shotsDir, { recursive: true });
-  const env = { ...process.env, FACTORY_RUN_ID: String(id), FACTORY_SHOTS_DIR: shotsDir };
-  if (port) {
-    env.PORT = String(port);
-    env.BASE_URL = state.app.baseUrl;
-  }
-  const cmd = port ? command.replace(/\$PORT/g, String(port)).replace(/\$BASE_URL/g, state.app.baseUrl) : command;
+  const vars = { ...(port ? { PORT: port, BASE_URL: state.app.baseUrl } : {}), ...serviceEnv(state.services) };
+  const env = { ...process.env, FACTORY_RUN_ID: String(id), FACTORY_SHOTS_DIR: shotsDir, ...stringify(vars) };
+  const cmd = fillVars(command, vars);
   const attempt = checks.filter((c) => c.gate === gate && c.cycle === state.cycle).length + 1;
   const logFile = join(runDir(cfg, id), 'logs', `${gate}-c${state.cycle}-t${attempt}.log`);
   const head = headInfo(cfg);
@@ -332,22 +346,27 @@ async function waitReady(url, timeoutMs) {
   throw new FactoryError('error', `O app não respondeu em ${url} dentro de ${Math.round(timeoutMs / 1000)} s (${lastError}).`, 'Veja app.log no diretório do run e corrija a receita "start"/"ready".');
 }
 
-/** Sobe o app pela receita numa porta livre, em segundo plano, e espera ele responder. */
-async function launchApp(cfg, dir, label, onStarted = () => {}) {
+const stringify = (vars) => Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)]));
+
+/**
+ * Sobe o app pela receita numa porta livre, em segundo plano, e espera ele responder.
+ * `extraVars` são as URLs dos serviços de outros repos, na variável que a receita pediu.
+ */
+async function launchApp(cfg, dir, label, onStarted = () => {}, extraVars = {}) {
   if (!cfg.run?.start || !cfg.run?.ready) {
     throw new FactoryError('config', 'A receita precisa de "start" e "ready" em .factory/project.json.', 'Rode /setup para completar a receita.');
   }
   const port = await freePort();
-  const baseUrl = String(cfg.run.baseUrl ?? 'http://localhost:$PORT').replace(/\$PORT/g, String(port));
-  const fill = (s) => String(s).replace(/\$PORT/g, String(port)).replace(/\$BASE_URL/g, baseUrl);
-  const readyUrl = fill(cfg.run.ready);
-  const command = fill(cfg.run.start);
+  const baseUrl = fillVars(cfg.run.baseUrl ?? 'http://localhost:$PORT', { PORT: port });
+  const vars = { ...extraVars, PORT: port, BASE_URL: baseUrl };
+  const readyUrl = fillVars(cfg.run.ready, vars);
+  const command = fillVars(cfg.run.start, vars);
   mkdirSync(dir, { recursive: true });
   const logFile = join(dir, 'app.log');
   const fd = openSync(logFile, 'a');
   const child = spawn(command, {
     cwd: cfg.root,
-    env: { ...process.env, PORT: String(port), BASE_URL: baseUrl, FACTORY_RUN_ID: String(label) },
+    env: { ...process.env, ...stringify(vars), FACTORY_RUN_ID: String(label) },
     shell: true,
     detached: true,
     stdio: ['ignore', fd, fd],
@@ -356,7 +375,7 @@ async function launchApp(cfg, dir, label, onStarted = () => {}) {
   child.unref();
   // O filho tem a própria cópia do descritor; manter a nossa aberta trava o log no Windows.
   closeSync(fd);
-  const app = { pid: child.pid, port, baseUrl, startedAt: new Date().toISOString() };
+  const app = { pid: child.pid, port, baseUrl, readyUrl, startedAt: new Date().toISOString() };
   onStarted(app);
   try {
     await waitReady(readyUrl, Number(cfg.run.readyTimeoutSeconds ?? 120) * 1000);
@@ -367,19 +386,154 @@ async function launchApp(cfg, dir, label, onStarted = () => {}) {
   return { app, log: logFile };
 }
 
+// ---------- serviços de outros repos ----------
+//
+// O front testa contra a API de verdade: `run.services` lista os repos vizinhos que o app precisa
+// de pé. Cada um sobe pela receita dele, numa cópia limpa (worktree) da branch da trilha no origin
+// (develop numa feature, QA num bugfix, a de produção num hotfix), fora de qualquer repo, numa
+// porta livre. O app e os testes recebem a URL do serviço na variável que a receita pediu.
+
+function serviceSpecs(cfg) {
+  const list = cfg.run?.services ?? [];
+  if (!Array.isArray(list)) throw new FactoryError('config', '"run.services" precisa ser uma lista.', 'Use [{ "repo": "<nome do repo>", "env": "API_URL" }].');
+  return list.map((svc) => {
+    if (!svc?.repo || !svc?.env) {
+      throw new FactoryError('config', 'Cada serviço em "run.services" precisa de "repo" e "env".', 'Exemplo: { "repo": "Loja-API", "env": "API_URL" }.');
+    }
+    return { repo: String(svc.repo), env: String(svc.env), ref: svc.ref ? String(svc.ref) : null };
+  });
+}
+
+function serviceEnv(services) {
+  return Object.fromEntries((services ?? []).filter((svc) => svc.pid && svc.baseUrl).map((svc) => [svc.env, svc.baseUrl]));
+}
+
+/** A cópia fica no temp da máquina: dentro de um repo, as ferramentas dele achariam o código do vizinho. */
+function serviceDir(cfg, label, repo) {
+  const owner = createHash('sha1').update(resolve(cfg.root).toLowerCase()).digest('hex').slice(0, 8);
+  return join(tmpdir(), 'factory-svc', `${owner}-${slugify(String(label), 20)}-${slugify(repo, 30)}`);
+}
+
+function quietGit(args, cwd, timeout = 60000) {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout,
+    windowsHide: true,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+  }).trim();
+}
+
+/** Deixa a cópia do vizinho em origin/<ref>. Sem rede, usa o que o clone já tem e avisa. */
+function prepareServiceCopy(sibling, ref, dir) {
+  let fresh = true;
+  try {
+    quietGit(['fetch', 'origin', ref], sibling.root);
+  } catch {
+    fresh = false;
+  }
+  let sha;
+  try {
+    sha = git(['rev-parse', `origin/${ref}`], sibling.root);
+  } catch {
+    throw new FactoryError('config', `O clone de ${sibling.repo} não tem a branch origin/${ref}.`, `Confira a conexão e rode \`git fetch origin ${ref}\` no clone de ${sibling.repo}.`);
+  }
+  if (existsSync(join(dir, '.git'))) {
+    git(['checkout', '--detach', '--force', sha], dir);
+    return { sha, fresh, created: false };
+  }
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  git(['worktree', 'prune'], sibling.root);
+  mkdirSync(dirname(dir), { recursive: true });
+  git(['worktree', 'add', '--detach', '--force', dir, sha], sibling.root);
+  return { sha, fresh, created: true };
+}
+
+function siblingConfig(cfg, repo) {
+  return resolveConfig({ cwd: cfg.root, requireAdo: false, repoOverride: repo });
+}
+
+async function startServices(cfg, { label, kind, base, logDir, previous = [] }) {
+  const started = [];
+  try {
+    for (const spec of serviceSpecs(cfg)) {
+      const sibling = siblingConfig(cfg, spec.repo);
+      const ref = spec.ref ?? (kind === 'hotfix' ? defaultBranch(sibling) : base ?? cfg.branches.develop);
+      const dir = serviceDir(cfg, label, spec.repo);
+      const copy = prepareServiceCopy(sibling, ref, dir);
+      const svcCfg = resolveConfig({ cwd: dir, requireAdo: false });
+      if (!svcCfg.run?.start || !svcCfg.run?.ready) {
+        throw new FactoryError('config', `A receita de ${spec.repo} em origin/${ref} não diz como subir o app ("start" e "ready").`, `Rode /setup no repo ${spec.repo} e integre a receita na ${ref}.`);
+      }
+      const logs = join(logDir, 'services', spec.repo);
+      const before = previous.find((svc) => svc.repo === spec.repo);
+      // Instalar leva minutos: só de novo quando a cópia é nova ou o código mudou.
+      if (svcCfg.run.install && (copy.created || before?.installedSha !== copy.sha)) {
+        const result = execCommand(svcCfg, svcCfg.run.install, { ...process.env }, join(logs, 'install.log'));
+        if (!result.ok) {
+          throw new FactoryError('error', `A instalação de ${spec.repo} (origin/${ref}) falhou.`, `Veja ${join(logs, 'install.log')}.`, { tail: result.tail });
+        }
+      }
+      const { app } = await launchApp(svcCfg, logs, `${label}-${spec.repo}`);
+      started.push({ repo: spec.repo, env: spec.env, ref, sha: copy.sha, fresh: copy.fresh, dir, installedSha: copy.sha, ...app });
+    }
+  } catch (err) {
+    for (const svc of started) stopProcess(svc.pid);
+    throw err;
+  }
+  return started;
+}
+
+function stopServices(cfg, services, { clean = false } = {}) {
+  const out = [];
+  for (const svc of services ?? []) {
+    const stopped = svc.pid ? stopProcess(svc.pid) : false;
+    let removed = false;
+    if (clean && svc.dir) {
+      try {
+        git(['worktree', 'remove', '--force', svc.dir], siblingConfig(cfg, svc.repo).root);
+        removed = true;
+      } catch {
+        // clone vizinho sumiu ou a cópia já foi apagada: limpa o que der
+        rmSync(svc.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+        removed = !existsSync(svc.dir);
+      }
+    }
+    out.push({ repo: svc.repo, stopped, removed });
+  }
+  return out;
+}
+
+const serviceSummary = (services) => (services ?? []).map(({ repo, ref, sha, fresh, port, baseUrl, env }) => ({ repo, ref, sha, fresh, port, baseUrl, env }));
+
 async function cmdAppStart(cfg, args) {
   const id = toId(required(args, 'id'));
   const state = loadState(cfg, id);
   if (state.app?.pid) stopProcess(state.app.pid);
-  return launchApp(cfg, runDir(cfg, id), id, (app) => {
-    state.app = app;
+  stopServices(cfg, state.services);
+  const services = await startServices(cfg, { label: id, kind: state.kind, base: state.base, logDir: runDir(cfg, id), previous: state.services ?? [] });
+  state.services = services;
+  writeState(cfg, id, state);
+  try {
+    const started = await launchApp(cfg, runDir(cfg, id), id, (app) => {
+      state.app = app;
+      writeState(cfg, id, state);
+    }, serviceEnv(services));
+    const warnings = services.filter((svc) => !svc.fresh).map((svc) => `Sem rede para atualizar ${svc.repo}: o serviço subiu do origin/${svc.ref} que o clone já tinha (${svc.sha.slice(0, 7)}).`);
+    return { ...started, services: serviceSummary(services), ...(warnings.length ? { warnings } : {}) };
+  } catch (err) {
+    stopServices(cfg, services);
+    state.services = services.map((svc) => ({ ...svc, pid: null }));
     writeState(cfg, id, state);
-  });
+    throw err;
+  }
 }
 
 /** /setup: prova a receita inteira sem precisar de work item (instala, builda, testa, sobe o app). */
 async function cmdProve(cfg) {
   if (!cfg.run) throw new FactoryError('config', 'Não há receita em .factory/project.json.', 'Descubra a receita e grave em "run" antes de provar.');
+  serviceSpecs(cfg);
   const dir = join(cfg.runsDir, '_setup');
   const env = { ...process.env, FACTORY_RUN_ID: 'setup', FACTORY_SHOTS_DIR: join(dir, 'shots') };
   const steps = [];
@@ -391,18 +545,27 @@ async function cmdProve(cfg) {
   }
   if (cfg.run.start && cfg.run.ready) {
     let app;
+    let services = [];
+    let stage = 'start';
     try {
-      ({ app } = await launchApp(cfg, dir, 'setup'));
+      if (serviceSpecs(cfg).length) {
+        stage = 'services';
+        services = await startServices(cfg, { label: 'setup', kind: 'feature', base: cfg.branches.develop, logDir: dir });
+        steps.push({ gate: 'services', ok: true, services: serviceSummary(services) });
+        stage = 'start';
+      }
+      ({ app } = await launchApp(cfg, dir, 'setup', undefined, serviceEnv(services)));
       steps.push({ gate: 'start', ok: true, port: app.port });
       if (cfg.run.e2e) {
-        const cmd = cfg.run.e2e.replace(/\$PORT/g, String(app.port)).replace(/\$BASE_URL/g, app.baseUrl);
-        const result = execCommand(cfg, cmd, { ...env, PORT: String(app.port), BASE_URL: app.baseUrl }, join(dir, 'logs', 'e2e.log'));
+        const vars = { ...serviceEnv(services), PORT: app.port, BASE_URL: app.baseUrl };
+        const result = execCommand(cfg, fillVars(cfg.run.e2e, vars), { ...env, ...stringify(vars) }, join(dir, 'logs', 'e2e.log'));
         steps.push({ gate: 'e2e', ok: result.ok, exitCode: result.exitCode, durationMs: result.durationMs, tail: result.ok ? undefined : result.tail });
       }
     } catch (err) {
-      steps.push({ gate: 'start', ok: false, error: err.message, fix: err.fix });
+      steps.push({ gate: stage, ok: false, error: err.message, fix: err.fix });
     } finally {
       if (app) stopProcess(app.pid);
+      stopServices(cfg, services, { clean: true });
     }
   }
   return { ok: steps.every((s) => s.ok), steps, logs: join(dir, 'logs') };
@@ -421,14 +584,18 @@ function stopProcess(pid) {
   }
 }
 
+/** Derruba o app e os serviços. `--clean` também apaga as cópias dos repos vizinhos (fim do run). */
 function cmdAppStop(cfg, args) {
   const id = toId(required(args, 'id'));
   const state = loadState(cfg, id);
-  if (!state.app?.pid) return { stopped: false };
-  const stopped = stopProcess(state.app.pid);
+  const clean = Boolean(args.clean);
+  const stopped = state.app?.pid ? stopProcess(state.app.pid) : false;
+  const services = stopServices(cfg, state.services, { clean });
   delete state.app;
+  if (clean) delete state.services;
+  else if (state.services) state.services = state.services.map((svc) => ({ ...svc, pid: null }));
   writeState(cfg, id, state);
-  return { stopped };
+  return { stopped, ...(services.length ? { services } : {}) };
 }
 
 // ---------- report ----------
@@ -546,7 +713,8 @@ export async function dispatch(argv) {
   if (!handler) {
     throw new FactoryError('config', `Comando desconhecido: "${args._[0] ?? ''}".`, `Use: ${Object.keys(COMMANDS).join(', ')}.`);
   }
-  return handler(resolveConfig({ requireAdo: false }), args);
+  const repoOverride = args.repo && args.repo !== true ? String(args.repo) : null;
+  return handler(resolveConfig({ requireAdo: false, repoOverride }), args);
 }
 
 if (isEntryPoint(import.meta.url)) run(() => dispatch(process.argv.slice(2)));

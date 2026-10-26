@@ -151,7 +151,7 @@ function relationOp(cfg, rel, targetId) {
 
 const SCOPES = {
   prd: ['node', 'remote', 'token', 'project', 'identity', 'states'],
-  deliver: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches', 'policies', 'recipe'],
+  deliver: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches', 'policies', 'recipe', 'services'],
   release: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches'],
   setup: [],
 };
@@ -246,6 +246,14 @@ async function doctor(args) {
     const needed = ['install', 'test', ...(recipe.e2e ? ['start', 'ready'] : [])];
     const missingRecipe = needed.filter((k) => !recipe[k]);
     add('recipe', missingRecipe.length === 0, missingRecipe.length ? `faltam em .factory/project.json: ${missingRecipe.join(', ')}` : 'receita de execução completa', 'Rode /setup para descobrir e provar a receita de execução.');
+
+    // O aceite do front sobe a API do clone vizinho: sem o clone, o e2e não roda.
+    const services = Array.isArray(recipe.services) ? recipe.services : [];
+    if (services.length) {
+      const cloned = cfg.workspace.members.map((m) => m.name.toLowerCase());
+      const missing = services.map((svc) => String(svc?.repo ?? '')).filter((name) => !cloned.includes(name.toLowerCase()));
+      add('services', missing.length === 0, missing.length ? `sem clone na pasta de trabalho: ${missing.join(', ')}` : `serviços: ${services.map((svc) => svc.repo).join(', ')}`, `Clone ${missing.join(', ')} ao lado deste repo (${cfg.workspace.root}).`);
+    }
   }
 
   const skew = clockSkewSeconds();

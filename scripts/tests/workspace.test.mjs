@@ -263,6 +263,31 @@ test('wi search filtra pelos filhos de uma Feature e mostra o repo de cada PRD',
   assert.deepEqual(result.items.map((i) => [i.id, i.repo, i.parent]), [[91, 'loja-api', 90], [92, 'loja-front', 90]]);
 });
 
+test('doctor do front aponta o serviço cujo repo não está clonado ao lado', async () => {
+  const front = makeWorkspace([{ name: 'loja-front', project: { run: { install: 'npm ci', test: 'npm test', services: [{ repo: 'loja-api', env: 'API_URL' }] } } }]);
+  try {
+    process.chdir(front.paths['loja-front']);
+    mock = mockFetch([
+      connection,
+      ['GET', /\/_apis\/git\/repositories\/loja-front$/, () => ({ body: { id: 'r2', name: 'loja-front', defaultBranch: 'refs/heads/main' } })],
+      ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
+      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+      ['GET', /\/policy\/types$/, () => ({ body: { value: [{ id: 'p1', displayName: 'Minimum number of reviewers' }] } })],
+      ['GET', /\/policy\/configurations$/, () => ({ body: { value: [{ type: { id: 'p1' }, isEnabled: true }] } })],
+    ]);
+    await assert.rejects(dispatch(['doctor', '--for', 'deliver']), (err) => {
+      const services = err.data.checks.find((c) => c.id === 'services');
+      assert.equal(services.ok, false);
+      assert.match(services.detail, /loja-api/);
+      assert.deepEqual(err.data.checks.filter((c) => c.required && !c.ok).map((c) => c.id), ['services']);
+      return true;
+    });
+  } finally {
+    process.chdir(cwd);
+    front.cleanup();
+  }
+});
+
 test('doctor na pasta de trabalho confere o projeto e deixa branches e receita para cada repo', async () => {
   const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
   try {

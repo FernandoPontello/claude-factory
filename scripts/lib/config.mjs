@@ -69,9 +69,14 @@ export function parseRemote(url) {
   return null;
 }
 
+/** A URL do origin como está configurada (sem aplicar `url.<x>.insteadOf`). */
+function originUrl(dir) {
+  return git(['config', '--get', 'remote.origin.url'], dir);
+}
+
 function remoteOf(dir) {
   try {
-    return parseRemote(git(['remote', 'get-url', 'origin'], dir));
+    return parseRemote(originUrl(dir));
   } catch {
     return null;
   }
@@ -194,7 +199,7 @@ export function resolveConfig({ cwd = process.cwd(), requireAdo = true, repoOver
   let remoteUrl = '';
   if (root) {
     try {
-      remoteUrl = git(['remote', 'get-url', 'origin'], root);
+      remoteUrl = originUrl(root);
     } catch {
       remoteUrl = '';
     }
