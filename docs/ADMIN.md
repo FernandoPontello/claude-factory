@@ -78,10 +78,16 @@ Project settings → Teams → (time) → ou Boards → Board → configuraçõe
 - **Sprints:** o time precisa ter as iterações configuradas (Project settings → Team
   configuration → Iterations). O `/deliver` põe o PRD na sprint atual ao reservar, e as tasks de
   horas nascem nela. Sem sprint atual, o item fica onde está.
-- **Regras de automação:** Boards → configurações → Backlogs/Automation: desligue as regras que
-  mudam o estado do pai quando um filho muda ("ativar o pai quando um filho fica ativo", "fechar
-  o pai quando todos os filhos fecham"). A task de horas não pode mover o PRD; quem move o PRD é
-  a factory e o merge.
+- **Regras de automação:** em **Boards → Backlogs**, escolha o nível **Stories**, engrenagem
+  **Configure team settings**, aba **Rules**, e deixe as três regras desmarcadas:
+  - *Update parent status to Active when a child status is active*;
+  - *Update parent status to Resolved when all child statuses are Resolved or Completed*;
+  - *Update parent status to Closed when all child statuses are Closed or Completed*.
+
+  Repita no nível **Features**: cada nível tem as próprias regras. Elas só disparam quando alguém
+  muda o estado pelo board, pelo backlog ou pela sprint, não pela API que a factory usa; mesmo
+  assim, uma task de horas arrastada na sprint não pode mover o PRD. Quem move o PRD é a factory
+  e o merge.
 - **Nome do time:** a factory usa `<projeto> Team`. Se for outro, grave em
   `"ado": { "team": "<nome>" }` no `.factory/project.json` de cada repo.
 

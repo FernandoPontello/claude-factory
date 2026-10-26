@@ -911,7 +911,7 @@ async function setupCheck(cfg) {
   result.manual = [
     'Repos > Settings, em cada repo: ligue "Commit mention linking" e "Commit mention work item resolution" (não há API pública estável para isso).',
     'Boards > colunas do time: cada estado numa coluna (Draft, Ready for Dev, In Progress, In Review, Integrated, In QA, Done, mais uma coluna para cada estado antigo que ainda tem itens). Estado sem coluna some do board.',
-    'Boards > configurações do time > regras de automação: desligue as regras que mudam o estado do pai quando um filho muda (a task de horas não pode mover o PRD).',
+    'Boards > Backlogs > (níveis Stories e Features) > Configure team settings > Rules: deixe desmarcadas as três regras "Update parent status to ..." (a task de horas não pode mover o PRD).',
   ];
   return result;
 }
