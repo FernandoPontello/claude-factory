@@ -160,6 +160,11 @@ export async function getTypeStates(cfg, type) {
   return data?.value ?? [];
 }
 
+export async function getTypeFields(cfg, type) {
+  const data = await request(cfg, 'GET', `${proj(cfg)}/_apis/wit/workitemtypes/${enc(type)}/fields`);
+  return data?.value ?? [];
+}
+
 // ---------- pull requests ----------
 
 export async function listPullRequests(cfg, repoId, { source, target, status = 'active' }) {

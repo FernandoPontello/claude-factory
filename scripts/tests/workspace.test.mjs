@@ -313,6 +313,8 @@ test('a task do PO usa o tipo genérico mesmo no repo com tipo próprio', async 
 
 const STATES_OK = ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed', 'Removed'].map((name) => ({ name })) } })];
 const TEAM = /\/Loja\/Loja Team\/_apis\/work\/teamsettings$/;
+const HOURS_FIELD = { referenceName: 'Microsoft.VSTS.Scheduling.CompletedWork' };
+const FIELDS_OK = ['GET', /\/workitemtypes\/[^/]+\/fields$/, () => ({ body: { value: [HOURS_FIELD] } })];
 
 test('setup na pasta de trabalho confere e aplica só o que é do projeto: estados e time', async () => {
   const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
@@ -346,7 +348,7 @@ test('setup na pasta de trabalho confere e aplica só o que é do projeto: estad
   }
 });
 
-test('doctor aponta tipo de task do repo que não existe no processo', async () => {
+test('doctor aponta tipo de task que não existe ou que não tem o campo de horas', async () => {
   const front = makeWorkspace([{ name: 'loja-front', project: { ado: { taskType: 'Frontend' } } }]);
   try {
     process.chdir(front.root);
@@ -355,7 +357,8 @@ test('doctor aponta tipo de task do repo que não existe no processo', async () 
       ['GET', /\/_apis\/git\/repositories\/loja-front$/, () => ({ body: { id: 'r2', name: 'loja-front', defaultBranch: 'refs/heads/main' } })],
       ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
       STATES_OK,
-      ['GET', /\/workitemtypes\/Frontend\/states$/, () => ({ status: 404, body: { message: 'tipo não existe' } })],
+      ['GET', /\/workitemtypes\/Frontend\/fields$/, () => ({ status: 404, body: { message: 'tipo não existe' } })],
+      ['GET', /\/workitemtypes\/Task\/fields$/, () => ({ body: { value: [{ referenceName: 'System.Title' }] } })],
       ['GET', /\/policy\/types$/, () => ({ body: { value: [] } })],
       ['GET', /\/policy\/configurations$/, () => ({ body: { value: [] } })],
     ]);
@@ -363,7 +366,8 @@ test('doctor aponta tipo de task do repo que não existe no processo', async () 
     await assert.rejects(dispatch(['doctor', '--for', 'deliver', '--repo', 'loja-front']), (err) => {
       const tasks = err.data.checks.find((c) => c.id === 'tasks');
       assert.equal(tasks.ok, false);
-      assert.match(tasks.detail, /Frontend/);
+      assert.match(tasks.detail, /Frontend: o tipo não existe/);
+      assert.match(tasks.detail, /Task: sem o campo Completed Work/);
       return true;
     });
   } finally {
@@ -426,6 +430,7 @@ test('doctor do front aponta o serviço cujo repo não está clonado ao lado', a
       ['GET', /\/_apis\/git\/repositories\/loja-front$/, () => ({ body: { id: 'r2', name: 'loja-front', defaultBranch: 'refs/heads/main' } })],
       ['GET', /\/refs$/, (req) => ({ body: { value: [{ name: `refs/${req.query.filter}`, objectId: 'abc' }] } })],
       ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+      FIELDS_OK,
       ['GET', /\/policy\/types$/, () => ({ body: { value: [{ id: 'p1', displayName: 'Minimum number of reviewers' }] } })],
       ['GET', /\/policy\/configurations$/, () => ({ body: { value: [{ type: { id: 'p1' }, isEnabled: true }] } })],
     ]);
@@ -450,6 +455,7 @@ test('doctor na pasta de trabalho confere o projeto e deixa branches e receita p
       connection,
       ['GET', /\/_apis\/projects\/Loja$/, () => ({ body: { id: 'proj-1', name: 'Loja' } })],
       ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Ready', 'Executando', 'Revisao', 'Integrado', 'Homologando', 'Closed'].map((name) => ({ name })) } })],
+      FIELDS_OK,
     ]);
     const result = await dispatch(['doctor', '--for', 'prd']);
     const ids = result.checks.map((c) => c.id);

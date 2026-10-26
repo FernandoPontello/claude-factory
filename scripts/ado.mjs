@@ -153,7 +153,7 @@ function relationOp(cfg, rel, targetId) {
 // ---------- doctor ----------
 
 const SCOPES = {
-  prd: ['node', 'remote', 'token', 'project', 'identity', 'states'],
+  prd: ['node', 'remote', 'token', 'project', 'identity', 'states', 'tasks'],
   deliver: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches', 'policies', 'recipe', 'services', 'tasks'],
   release: ['node', 'remote', 'token', 'project', 'identity', 'states', 'branches'],
   setup: [],
@@ -230,15 +230,23 @@ async function doctor(args) {
   }
   add('states', missingStates.length === 0, missingStates.length ? `faltam: ${missingStates.join('; ')}` : 'todos os estados existem', 'O admin da organização roda /setup uma vez (ou segue docs/ADMIN.md).');
 
-  // A task de horas do dev nasce com o tipo do repo: tipo que não existe só falharia na entrega.
-  if (cfg.taskType) {
+  // As tasks de horas (a do PO e a do dev, que usa o tipo do repo) precisam do tipo e do campo de
+  // horas: sem isso, o registro só falharia no fim da sessão, com a pessoa já esperando.
+  const taskProblems = [];
+  for (const type of [...new Set([cfg.types.task, cfg.taskType].filter(Boolean))]) {
     try {
-      await api.getTypeStates(cfg, cfg.taskType);
-      add('tasks', true, `tasks de horas do tipo ${cfg.taskType}`);
+      const fields = (await api.getTypeFields(cfg, type)).map((f) => f.referenceName);
+      if (!fields.includes('Microsoft.VSTS.Scheduling.CompletedWork')) taskProblems.push(`${type}: sem o campo Completed Work`);
     } catch (err) {
-      add('tasks', false, `o tipo de task "${cfg.taskType}" não existe no processo (${err.message})`, 'Corrija "ado.taskType" em .factory/project.json com um tipo de task que o projeto tem.');
+      taskProblems.push(`${type}: ${err instanceof FactoryError && err.code === 'not_found' ? 'o tipo não existe no processo' : err.message}`);
     }
   }
+  add(
+    'tasks',
+    taskProblems.length === 0,
+    taskProblems.length ? taskProblems.join('; ') : `tasks de horas: ${[...new Set([cfg.types.task, cfg.taskType].filter(Boolean))].join(', ')}`,
+    'Use em "ado.taskType" (.factory/project.json) um tipo de task do projeto que tenha Completed Work e Remaining Work, ou peça ao admin para pôr os campos no tipo (docs/ADMIN.md).',
+  );
 
   if (repo) {
     try {
