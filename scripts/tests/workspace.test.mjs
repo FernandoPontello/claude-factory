@@ -87,6 +87,22 @@ test('resolveConfig na pasta de trabalho não tem repo; --repo escolhe o clone',
   }
 });
 
+test('na pasta de trabalho, o time e os estados vêm do project.json dos repos; a receita não', () => {
+  const custom = makeWorkspace([
+    { name: 'loja-api', project: { ado: { team: 'Time Loja', taskType: 'Backend' }, states: { ready: 'Pronto' }, run: { install: 'npm ci' } } },
+    { name: 'loja-front' },
+  ]);
+  try {
+    const cfg = resolveConfig({ cwd: custom.root });
+    assert.equal(cfg.team, 'Time Loja');
+    assert.equal(cfg.states.ready, 'Pronto');
+    assert.equal(cfg.taskType, null);
+    assert.equal(cfg.run, null);
+  } finally {
+    custom.cleanup();
+  }
+});
+
 test('comando de um repo só, na pasta de trabalho, pede --repo', async () => {
   const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
   try {

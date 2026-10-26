@@ -165,6 +165,16 @@ export function recipeForPlatform(run, platform = process.platform) {
   return { ...base, ...(override ?? {}) };
 }
 
+function projectLevelData(ws) {
+  for (const member of ws.members) {
+    const { exists, data } = loadProjectFile(member.path);
+    if (!exists) continue;
+    const { team } = data.ado ?? {};
+    return { ...(team ? { ado: { team } } : {}), types: data.types, states: data.states, taskStates: data.taskStates, branches: data.branches };
+  }
+  return {};
+}
+
 /**
  * Monta a configuração efetiva.
  * - Dentro de um repo: org/projeto/repo vêm do remote `origin` (o project.json só sobrescreve).
@@ -195,7 +205,9 @@ export function resolveConfig({ cwd = process.cwd(), requireAdo = true, repoOver
   }
 
   const project = root ? loadProjectFile(root) : { file: null, exists: false, source: null, data: {} };
-  const data = project.data;
+  // Na pasta de trabalho vale o que é do projeto (time, tipos, estados, branches), lido do primeiro
+  // repo configurado; receita e tipo de task são de cada repo e ficam de fora.
+  const data = workspaceMode ? projectLevelData(getWorkspace()) : project.data;
   let remoteUrl = '';
   if (root) {
     try {
