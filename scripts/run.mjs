@@ -72,6 +72,18 @@ function fillVars(text, vars) {
     .reduce((out, [name, value]) => out.split(`$${name}`).join(String(value)), String(text));
 }
 
+/**
+ * `run.env`: variáveis fixas que todo comando da receita recebe (por exemplo `BROWSER=none` no
+ * Create React App). É o jeito que funciona igual no cmd.exe e no sh, sem `VAR=x comando`.
+ */
+function recipeEnv(cfg, vars = {}) {
+  const env = cfg.run?.env ?? {};
+  if (typeof env !== 'object' || Array.isArray(env) || Object.values(env).some((v) => typeof v !== 'string')) {
+    throw new FactoryError('config', '"run.env" precisa ser um objeto de textos.', 'Exemplo: { "BROWSER": "none" }.');
+  }
+  return Object.fromEntries(Object.entries(env).map(([name, value]) => [name, fillVars(value, vars)]));
+}
+
 function headInfo(cfg) {
   try {
     return { sha: git(['rev-parse', 'HEAD'], cfg.root), dirty: git(['status', '--porcelain'], cfg.root).length > 0 };
@@ -261,7 +273,7 @@ async function cmdCheck(cfg, args) {
   const shotsDir = join(runDir(cfg, id), 'shots');
   mkdirSync(shotsDir, { recursive: true });
   const vars = { ...(port ? { PORT: port, BASE_URL: state.app.baseUrl } : {}), ...serviceEnv(state.services) };
-  const env = { ...process.env, FACTORY_RUN_ID: String(id), FACTORY_SHOTS_DIR: shotsDir, ...stringify(vars) };
+  const env = { ...process.env, ...recipeEnv(cfg, vars), FACTORY_RUN_ID: String(id), FACTORY_SHOTS_DIR: shotsDir, ...stringify(vars) };
   const cmd = fillVars(command, vars);
   const attempt = checks.filter((c) => c.gate === gate && c.cycle === state.cycle).length + 1;
   const logFile = join(runDir(cfg, id), 'logs', `${gate}-c${state.cycle}-t${attempt}.log`);
@@ -373,7 +385,7 @@ async function launchApp(cfg, dir, label, onStarted = () => {}, extraVars = {}, 
   const fd = openSync(logFile, 'a');
   const child = spawn(command, {
     cwd: cfg.root,
-    env: { ...process.env, ...stringify(vars), FACTORY_RUN_ID: String(label) },
+    env: { ...process.env, ...recipeEnv(cfg, vars), ...stringify(vars), FACTORY_RUN_ID: String(label) },
     shell: true,
     detached: true,
     stdio: ['ignore', fd, fd],
@@ -488,7 +500,7 @@ async function startServices(cfg, { label, kind, base, logDir, previous = [], ap
       const before = previous.find((svc) => svc.repo === spec.repo);
       // Instalar leva minutos: só de novo quando a cópia é nova ou o código mudou.
       if (svcCfg.run.install && (copy.created || before?.installedSha !== copy.sha)) {
-        const result = execCommand(svcCfg, svcCfg.run.install, { ...process.env }, join(logs, 'install.log'));
+        const result = execCommand(svcCfg, svcCfg.run.install, { ...process.env, ...recipeEnv(svcCfg) }, join(logs, 'install.log'));
         if (!result.ok) {
           throw new FactoryError('error', `A instalação de ${spec.repo} (origin/${ref}) falhou.`, `Veja ${join(logs, 'install.log')}.`, { tail: result.tail });
         }
@@ -556,7 +568,7 @@ async function cmdProve(cfg) {
   if (!cfg.run) throw new FactoryError('config', 'Não há receita em .factory/project.json.', 'Descubra a receita e grave em "run" antes de provar.');
   serviceSpecs(cfg);
   const dir = join(cfg.runsDir, '_setup');
-  const env = { ...process.env, FACTORY_RUN_ID: 'setup', FACTORY_SHOTS_DIR: join(dir, 'shots') };
+  const env = { ...process.env, ...recipeEnv(cfg), FACTORY_RUN_ID: 'setup', FACTORY_SHOTS_DIR: join(dir, 'shots') };
   const steps = [];
   for (const gate of ['install', 'build', 'test']) {
     if (!cfg.run[gate]) continue;
@@ -580,7 +592,7 @@ async function cmdProve(cfg) {
       steps.push({ gate: 'start', ok: true, port: app.port });
       if (cfg.run.e2e) {
         const vars = { ...serviceEnv(services), PORT: app.port, BASE_URL: app.baseUrl };
-        const result = execCommand(cfg, fillVars(cfg.run.e2e, vars), { ...env, ...stringify(vars) }, join(dir, 'logs', 'e2e.log'));
+        const result = execCommand(cfg, fillVars(cfg.run.e2e, vars), { ...env, ...recipeEnv(cfg, vars), ...stringify(vars) }, join(dir, 'logs', 'e2e.log'));
         steps.push({ gate: 'e2e', ok: result.ok, exitCode: result.exitCode, durationMs: result.durationMs, tail: result.ok ? undefined : result.tail });
       }
     } catch (err) {

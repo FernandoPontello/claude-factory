@@ -167,6 +167,9 @@ Sem `run` em `.factory/project.json`:
    - Prefira scripts do próprio projeto (`npm run`, `dotnet`, `make`) e ferramentas que funcionam
      nos dois.
    - Evite sintaxe de um shell só, como `VAR=x comando` ou `rm -rf`.
+   - Variável fixa que os comandos precisam (por exemplo `BROWSER=none`, para o Create React App
+     não abrir o navegador) vai em `run.env`: `"env": { "BROWSER": "none" }`. Ela chega a todos os
+     comandos da receita, com `$PORT` e `$BASE_URL` trocados.
    - O app recebe `PORT` e `BASE_URL` como variáveis de ambiente, e `$PORT` e `$BASE_URL` também
      são trocados no texto do comando.
    - Quando um comando precisa ser diferente, use `run.win32` ou `run.posix` só com as chaves que
