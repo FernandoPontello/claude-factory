@@ -348,18 +348,23 @@ async function waitReady(url, timeoutMs) {
   throw new FactoryError('error', `O app não respondeu em ${url} dentro de ${Math.round(timeoutMs / 1000)} s (${lastError}).`, 'Veja app.log no diretório do run e corrija a receita "start"/"ready".');
 }
 
+/** Uma porta livre e a URL que o app vai ter nela. */
+async function appAddress(cfg) {
+  const port = await freePort();
+  return { port, baseUrl: fillVars(cfg.run?.baseUrl ?? 'http://localhost:$PORT', { PORT: port }) };
+}
+
 const stringify = (vars) => Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, String(v)]));
 
 /**
  * Sobe o app pela receita numa porta livre, em segundo plano, e espera ele responder.
  * `extraVars` são as URLs dos serviços de outros repos, na variável que a receita pediu.
  */
-async function launchApp(cfg, dir, label, onStarted = () => {}, extraVars = {}) {
+async function launchApp(cfg, dir, label, onStarted = () => {}, extraVars = {}, address = null) {
   if (!cfg.run?.start || !cfg.run?.ready) {
     throw new FactoryError('config', 'A receita precisa de "start" e "ready" em .factory/project.json.', 'Rode /setup para completar a receita.');
   }
-  const port = await freePort();
-  const baseUrl = fillVars(cfg.run.baseUrl ?? 'http://localhost:$PORT', { PORT: port });
+  const { port, baseUrl } = address ?? (await appAddress(cfg));
   const vars = { ...extraVars, PORT: port, BASE_URL: baseUrl };
   const readyUrl = fillVars(cfg.run.ready, vars);
   const command = fillVars(cfg.run.start, vars);
@@ -402,7 +407,11 @@ function serviceSpecs(cfg) {
     if (!svc?.repo || !svc?.env) {
       throw new FactoryError('config', 'Cada serviço em "run.services" precisa de "repo" e "env".', 'Exemplo: { "repo": "Loja-API", "env": "API_URL" }.');
     }
-    return { repo: String(svc.repo), env: String(svc.env), ref: svc.ref ? String(svc.ref) : null };
+    const vars = svc.vars ?? {};
+    if (typeof vars !== 'object' || Array.isArray(vars) || Object.values(vars).some((v) => typeof v !== 'string')) {
+      throw new FactoryError('config', `"vars" do serviço ${svc.repo} precisa ser um objeto de textos.`, 'Exemplo: { "Cors__AllowedOrigins__0": "$APP_URL" }.');
+    }
+    return { repo: String(svc.repo), env: String(svc.env), ref: svc.ref ? String(svc.ref) : null, vars };
   });
 }
 
@@ -458,7 +467,12 @@ function siblingConfig(cfg, repo) {
   return resolveConfig({ cwd: cfg.root, requireAdo: false, repoOverride: repo });
 }
 
-async function startServices(cfg, { label, kind, base, logDir, previous = [] }) {
+/**
+ * `app` é o endereço já reservado do app que consome os serviços: `$APP_URL` e `$APP_PORT` nas
+ * `vars` de um serviço viram esse endereço (a API precisa dele para liberar o CORS, por exemplo).
+ */
+async function startServices(cfg, { label, kind, base, logDir, previous = [], app = null }) {
+  const appVars = app ? { APP_URL: app.baseUrl, APP_PORT: app.port } : {};
   const started = [];
   try {
     for (const spec of serviceSpecs(cfg)) {
@@ -479,8 +493,9 @@ async function startServices(cfg, { label, kind, base, logDir, previous = [] }) 
           throw new FactoryError('error', `A instalação de ${spec.repo} (origin/${ref}) falhou.`, `Veja ${join(logs, 'install.log')}.`, { tail: result.tail });
         }
       }
-      const { app } = await launchApp(svcCfg, logs, `${label}-${spec.repo}`);
-      started.push({ repo: spec.repo, env: spec.env, ref, sha: copy.sha, fresh: copy.fresh, dir, installedSha: copy.sha, ...app });
+      const vars = Object.fromEntries(Object.entries(spec.vars).map(([name, value]) => [name, fillVars(value, appVars)]));
+      const { app: svcApp } = await launchApp(svcCfg, logs, `${label}-${spec.repo}`, undefined, vars);
+      started.push({ repo: spec.repo, env: spec.env, ref, sha: copy.sha, fresh: copy.fresh, dir, installedSha: copy.sha, ...svcApp });
     }
   } catch (err) {
     for (const svc of started) stopProcess(svc.pid);
@@ -516,14 +531,16 @@ async function cmdAppStart(cfg, args) {
   const state = loadState(cfg, id);
   if (state.app?.pid) stopProcess(state.app.pid);
   stopServices(cfg, state.services);
-  const services = await startServices(cfg, { label: id, kind: state.kind, base: state.base, logDir: runDir(cfg, id), previous: state.services ?? [] });
+  // A porta do app é reservada antes: os serviços podem precisar da URL dele (CORS).
+  const address = await appAddress(cfg);
+  const services = await startServices(cfg, { label: id, kind: state.kind, base: state.base, logDir: runDir(cfg, id), previous: state.services ?? [], app: address });
   state.services = services;
   writeState(cfg, id, state);
   try {
     const started = await launchApp(cfg, runDir(cfg, id), id, (app) => {
       state.app = app;
       writeState(cfg, id, state);
-    }, serviceEnv(services));
+    }, serviceEnv(services), address);
     const warnings = services.filter((svc) => !svc.fresh).map((svc) => `Sem rede para atualizar ${svc.repo}: o serviço subiu do origin/${svc.ref} que o clone já tinha (${svc.sha.slice(0, 7)}).`);
     return { ...started, services: serviceSummary(services), ...(warnings.length ? { warnings } : {}) };
   } catch (err) {
@@ -552,13 +569,14 @@ async function cmdProve(cfg) {
     let services = [];
     let stage = 'start';
     try {
+      const address = await appAddress(cfg);
       if (serviceSpecs(cfg).length) {
         stage = 'services';
-        services = await startServices(cfg, { label: 'setup', kind: 'feature', base: cfg.branches.develop, logDir: dir });
+        services = await startServices(cfg, { label: 'setup', kind: 'feature', base: cfg.branches.develop, logDir: dir, app: address });
         steps.push({ gate: 'services', ok: true, services: serviceSummary(services) });
         stage = 'start';
       }
-      ({ app } = await launchApp(cfg, dir, 'setup', undefined, serviceEnv(services)));
+      ({ app } = await launchApp(cfg, dir, 'setup', undefined, serviceEnv(services), address));
       steps.push({ gate: 'start', ok: true, port: app.port });
       if (cfg.run.e2e) {
         const vars = { ...serviceEnv(services), PORT: app.port, BASE_URL: app.baseUrl };

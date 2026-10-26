@@ -140,7 +140,7 @@ Sem `run` em `.factory/project.json`:
        "baseUrl": "http://localhost:$PORT",
        "e2e": "npx playwright test", "e2eReport": "test-results/results.json",
        "testReport": "<caminho do JUnit XML, se o framework gerar>",
-       "services": [{ "repo": "<repo que precisa estar de pé>", "env": "<variável com a URL dele>" }]
+       "services": [{ "repo": "<repo que precisa estar de pé>", "env": "<variável com a URL dele>", "vars": { "<variável do vizinho>": "$APP_URL" } }]
      }
    }
    ```
@@ -153,6 +153,10 @@ Sem `run` em `.factory/project.json`:
    - `repo` é o nome do repo vizinho, clonado na mesma pasta de trabalho;
    - `env` é a variável em que este app lê a URL dele (por exemplo `API_URL`). O app e os testes
      a recebem no ambiente, e `$API_URL` também é trocado no texto dos comandos;
+   - `vars` (opcional) são variáveis para o processo do vizinho, e `$APP_URL` e `$APP_PORT` nelas
+     viram o endereço deste app, reservado antes de o vizinho subir. É o caso do CORS: uma API
+     ASP.NET que lê as origens de `Cors:AllowedOrigins` recebe
+     `"vars": { "Cors__AllowedOrigins__0": "$APP_URL" }`;
    - o `run` sobe o vizinho pela receita dele, a partir da branch da trilha no origin. Por isso a
      receita do vizinho precisa estar na develop dele antes: configure a API primeiro.
 5. **Tipo de task.** Pergunte qual tipo de work item o time usa para registrar horas de trabalho

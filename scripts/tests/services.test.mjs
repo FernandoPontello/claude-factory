@@ -30,7 +30,8 @@ before(() => {
           baseUrl: 'http://127.0.0.1:$PORT',
           e2e: `${node} e2e.js`,
           readyTimeoutSeconds: 20,
-          services: [{ repo: 'loja-api', env: 'API_URL' }],
+          // A API só aceita a origem que receber em CORS_ORIGIN, como o CORS de uma API de verdade.
+          services: [{ repo: 'loja-api', env: 'API_URL', vars: { CORS_ORIGIN: '$APP_URL' } }],
         },
       },
     },
@@ -51,7 +52,7 @@ before(() => {
     },
   }, null, 2));
   writeFileSync(join(api, 'install.js'), "const fs = require('fs'); const n = fs.existsSync('installed.txt') ? Number(fs.readFileSync('installed.txt', 'utf8')) : 0; fs.writeFileSync('installed.txt', String(n + 1));\n");
-  writeFileSync(join(api, 'server.js'), "require('http').createServer((q, s) => { s.setHeader('content-type', 'application/json'); s.end(JSON.stringify({ ok: true, from: 'api' })); }).listen(Number(process.env.PORT), '127.0.0.1');\n");
+  writeFileSync(join(api, 'server.js'), "require('http').createServer((q, s) => { s.setHeader('content-type', 'application/json'); s.end(JSON.stringify({ ok: true, from: 'api', cors: process.env.CORS_ORIGIN })); }).listen(Number(process.env.PORT), '127.0.0.1');\n");
   g(api, 'add', '.');
   g(api, 'commit', '-q', '-m', 'api');
   g(api, 'push', '-q', 'origin', 'HEAD:develop');
@@ -63,7 +64,7 @@ before(() => {
   writeFileSync(join(front, 'e2e.js'), [
     'const page = await (await fetch(process.env.BASE_URL)).text();',
     "const health = await (await fetch(process.env.API_URL + '/health')).json();",
-    'process.exit(page === process.env.API_URL && health.from === \'api\' ? 0 : 1);',
+    'process.exit(page === process.env.API_URL && health.from === \'api\' && health.cors === process.env.BASE_URL ? 0 : 1);',
   ].join('\n').replace(/^/, '(async () => {\n') + '\n})();\n');
   process.chdir(front);
 });
@@ -90,6 +91,8 @@ test('app-start sobe a API da develop numa cópia limpa e o front recebe a URL d
   assert.equal(svc.ref, 'develop');
   assert.equal(svc.fresh, true);
   assert.equal(await (await fetch(started.app.baseUrl)).text(), svc.baseUrl, 'o front recebeu a URL da API');
+  const health = await (await fetch(`${svc.baseUrl}/health`)).json();
+  assert.equal(health.cors, started.app.baseUrl, 'a API recebeu a URL do front antes de ele subir');
 
   const e2e = await dispatch(['check', '--id', '90', '--gate', 'e2e']);
   assert.equal(e2e.check.ok, true, e2e.tail);
