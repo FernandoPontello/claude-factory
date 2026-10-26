@@ -894,6 +894,10 @@ async function inspectTeam(cfg) {
 /** Na pasta de trabalho, só o que é do projeto (estados e time); branches e policies vêm com --repo. */
 async function setupCheck(cfg) {
   const result = { states: { missing: await inspectStates(cfg) }, team: await inspectTeam(cfg) };
+  if (Object.keys(result.states.missing).length) {
+    const processInfo = await inspectProcess(cfg);
+    result.states.process = { name: processInfo.name, customizationType: processInfo.customizationType, sharedWith: processInfo.sharedWith };
+  }
   if (cfg.repo) {
     const repo = await api.getRepo(cfg);
     const branches = await fixedBranches(cfg, repo);
@@ -930,18 +934,38 @@ function policySettings(kind, repoId, refName, cfg) {
   return { scope };
 }
 
-async function applyStates(cfg) {
-  const missing = await inspectStates(cfg);
-  if (!Object.keys(missing).length) return { applied: [], skipped: 'todos os estados já existem' };
+/** O processo do projeto e os outros projetos que o usam (estados novos valem para todos eles). */
+async function inspectProcess(cfg) {
   const project = await api.getProject(cfg);
   const processId = project.capabilities?.processTemplate?.templateTypeId;
   if (!processId) throw new FactoryError('error', 'Não consegui descobrir o processo do projeto.');
-  const processInfo = await api.getProcess(cfg, processId);
+  const info = await api.getProcess(cfg, processId, { projects: true });
+  const sharedWith = (info.projects ?? [])
+    .map((p) => p.name)
+    .filter((name) => name && name.toLowerCase() !== String(cfg.project).toLowerCase())
+    .sort();
+  return { id: processId, name: info.name, customizationType: info.customizationType, sharedWith };
+}
+
+async function applyStates(cfg) {
+  const missing = await inspectStates(cfg);
+  if (!Object.keys(missing).length) return { applied: [], skipped: 'todos os estados já existem' };
+  const processInfo = await inspectProcess(cfg);
+  const processId = processInfo.id;
   if (processInfo.customizationType === 'system') {
     throw new FactoryError(
       'config',
       `O projeto usa o processo de sistema "${processInfo.name}", que não pode receber estados.`,
-      'O admin da organização cria o processo herdado "Factory" (base Agile) e muda o projeto para ele; veja docs/ADMIN.md.',
+      'O admin da organização cria um processo herdado (base Agile) para o projeto e muda o projeto para ele; veja docs/ADMIN.md, seção 1.1.',
+    );
+  }
+  // Estado novo num processo compartilhado aparece em todos os projetos que o usam.
+  if (processInfo.sharedWith.length) {
+    throw new FactoryError(
+      'config',
+      `O processo "${processInfo.name}" também é usado por ${processInfo.sharedWith.join(', ')}; os estados da factory apareceriam lá.`,
+      'O admin cria um processo próprio para o projeto, com as mesmas customizações, e muda o projeto para ele (docs/ADMIN.md, seção 1.1). Depois, rode o /setup de novo.',
+      { process: processInfo },
     );
   }
   const applied = [];
@@ -1011,7 +1035,10 @@ async function setupApply(cfg, args) {
       failures.push({ step, error: err.message, fix: err.fix });
     }
   }
-  if (failures.length) throw new FactoryError(failures[0].step === 'states' ? 'config' : 'error', 'Parte do setup não foi aplicada.', failures[0].fix, { result, failures });
+  if (failures.length) {
+    const what = failures.map((f) => `${f.step}: ${f.error}`).join(' ');
+    throw new FactoryError(failures[0].step === 'states' ? 'config' : 'error', `Parte do setup não foi aplicada. ${what}`, failures[0].fix, { result, failures });
+  }
   return result;
 }
 

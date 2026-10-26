@@ -348,6 +348,42 @@ test('setup na pasta de trabalho confere e aplica só o que é do projeto: estad
   }
 });
 
+test('setup não põe estados num processo que outros projetos usam', async () => {
+  const only = makeWorkspace([{ name: 'loja-api' }, { name: 'loja-front' }]);
+  try {
+    process.chdir(only.root);
+    let sharedWith = [{ name: 'Loja' }, { name: 'Estimador' }, { name: 'Consultoria' }];
+    mock = mockFetch([
+      ['GET', /\/workitemtypes\/(User Story|Bug)\/states$/, () => ({ body: { value: ['New', 'Active', 'Closed', 'Removed'].map((name) => ({ name })) } })],
+      ['GET', TEAM, () => ({ body: { bugsBehavior: 'asRequirements' } })],
+      ['GET', /\/_apis\/projects\/Loja$/, () => ({ body: { id: 'proj-1', name: 'Loja', capabilities: { processTemplate: { templateTypeId: 'proc-1' } } } })],
+      ['GET', /\/_apis\/work\/processes\/proc-1$/, (req) => {
+        assert.equal(req.query.$expand, 'projects');
+        return { body: { name: 'Agile-Empresa', customizationType: 'inherited', projects: sharedWith } };
+      }],
+      ['GET', /\/_apis\/work\/processes\/proc-1\/workitemtypes$/, () => ({ body: { value: [
+        { name: 'User Story', referenceName: 'Agile-Empresa.UserStory', customization: 'inherited' },
+        { name: 'Bug', referenceName: 'Agile-Empresa.Bug', customization: 'inherited' },
+      ] } })],
+      ['POST', /\/workitemtypes\/[^/]+\/states$/, (req) => ({ body: { name: req.body.name } })],
+    ]);
+
+    const check = await dispatch(['setup', 'check']);
+    assert.deepEqual(check.states.process.sharedWith, ['Consultoria', 'Estimador']);
+    await expectError(dispatch(['setup', 'apply', '--only', 'states']), 'config', /Estimador.*processo próprio/s);
+    assert.equal(mock.calls.filter((c) => c.method === 'POST').length, 0, 'nada foi escrito no processo compartilhado');
+
+    // Com um processo só do projeto, os estados entram.
+    sharedWith = [{ name: 'Loja' }];
+    const applied = await dispatch(['setup', 'apply', '--only', 'states']);
+    assert.equal(applied.states.applied.length, 10);
+    assert.ok(applied.states.applied.includes('Bug: Homologando'));
+  } finally {
+    process.chdir(cwd);
+    only.cleanup();
+  }
+});
+
 test('doctor aponta tipo de task que não existe ou que não tem o campo de horas', async () => {
   const front = makeWorkspace([{ name: 'loja-front', project: { ado: { taskType: 'Frontend' } } }]);
   try {

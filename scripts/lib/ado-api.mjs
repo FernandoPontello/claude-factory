@@ -248,8 +248,9 @@ export async function processWorkItemTypes(cfg, processId) {
   return data?.value ?? [];
 }
 
-export async function getProcess(cfg, processId) {
-  return request(cfg, 'GET', `_apis/work/processes/${processId}`);
+/** O processo e, com `projects: true`, os projetos que o usam. */
+export async function getProcess(cfg, processId, { projects = false } = {}) {
+  return request(cfg, 'GET', `_apis/work/processes/${processId}`, { query: projects ? { $expand: 'projects' } : {} });
 }
 
 export async function deriveWorkItemType(cfg, processId, systemType) {

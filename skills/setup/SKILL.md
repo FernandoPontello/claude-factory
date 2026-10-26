@@ -83,9 +83,12 @@ Mostre o resultado. Fora o caso do passo 3, não commite nada.
 
 **Do projeto, uma vez:** `ado setup check` mostra os estados que faltam e a configuração do time.
 
-- **Estados que faltam:** `ado setup apply --only states`. Exige admin da organização. Se falhar
-  por permissão ou processo de sistema, mostre o passo a passo de
-  `${CLAUDE_PLUGIN_ROOT}/docs/ADMIN.md` e siga com o resto.
+- **Estados que faltam:** `ado setup apply --only states`. Exige admin da organização.
+  - `states.process.sharedWith` lista os outros projetos que usam o mesmo processo. Com algum
+    ali, o script se recusa a mexer no processo, porque os estados apareceriam neles também: o
+    caminho é um processo próprio para o projeto (`docs/ADMIN.md`, seção 1.1).
+  - Se falhar por permissão, processo de sistema ou processo compartilhado, mostre o passo a passo
+    de `${CLAUDE_PLUGIN_ROOT}/docs/ADMIN.md` e siga com o resto.
 - **Time:** `team.ok: false` quer dizer que os bugs não aparecem no board junto com as histórias.
   Diga o que muda e, com o OK, `ado setup apply --only team`. Se o time não existe (`team.error`),
   pergunte o nome e grave em `"ado": { "team": "<nome>" }` no `.factory/project.json` de cada
