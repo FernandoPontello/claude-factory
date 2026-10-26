@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { bareOrigin, makeWorkspace } from './helpers.mjs';
+import { bareOrigin, makeWorkspace, processGone } from './helpers.mjs';
 import { dispatch } from '../run.mjs';
 
 const node = JSON.stringify(process.execPath);
@@ -114,8 +114,7 @@ test('app-start sobe a API da develop numa cópia limpa e o front recebe a URL d
   assert.deepEqual(stopped.services.map((s) => [s.repo, s.removed]), [['loja-api', true]]);
   assert.equal(existsSync(dir), false);
   assert.doesNotMatch(g(ws.paths['loja-api'], 'worktree', 'list'), /factory-svc/);
-  await new Promise((r) => setTimeout(r, 1000));
-  await assert.rejects(fetch(state.services[0].baseUrl));
+  assert.equal(await processGone(state.services[0].pid), true, 'o serviço foi derrubado');
 });
 
 test('prove do /setup sobe o serviço, roda o aceite e apaga a cópia no fim', async () => {

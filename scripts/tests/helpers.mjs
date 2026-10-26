@@ -70,6 +70,37 @@ export function bareOrigin(dir) {
 }
 
 /**
+ * Espera um processo terminar (até `ms`). Conferir pela porta falha quando os testes rodam em
+ * paralelo: outro teste pode pegar a mesma porta logo depois.
+ */
+export async function processGone(pid, ms = 10000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/** Espera uma URL parar de responder (até `ms`). */
+export async function urlDown(url, ms = 10000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(1000) });
+    } catch {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/**
  * fetch simulado. `routes` é uma lista de [método, regex do caminho, handler(req) -> {status, body}].
  * Cada chamada fica registrada em `calls` para as asserções.
  */

@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeRepo } from './helpers.mjs';
+import { makeRepo, processGone, urlDown } from './helpers.mjs';
 import { dispatch } from '../run.mjs';
 
 let repo;
@@ -36,8 +36,7 @@ test('prove sobe o app pela receita, roda o e2e e derruba no fim', async () => {
   const start = result.steps.find((s) => s.gate === 'start');
   assert.ok(start.ok && start.port > 0);
   assert.equal(result.steps.find((s) => s.gate === 'e2e').ok, true);
-  await new Promise((r) => setTimeout(r, 1000));
-  await assert.rejects(fetch(`http://127.0.0.1:${start.port}/`));
+  assert.equal(await urlDown(`http://127.0.0.1:${start.port}/`), true, 'o app do prove foi derrubado');
 });
 
 test('run.env chega ao app, aos checks e ao prove, com $PORT trocado', async () => {
@@ -88,6 +87,5 @@ test('e2e exige o app do run de pé; app-stop derruba a árvore de processos', a
 
   const stopped = await dispatch(['app-stop', '--id', '70']);
   assert.equal(stopped.stopped, true);
-  await new Promise((r) => setTimeout(r, 1000));
-  await assert.rejects(fetch(`${started.app.baseUrl}/`));
+  assert.equal(await processGone(started.app.pid), true, 'a árvore do app foi derrubada');
 });
